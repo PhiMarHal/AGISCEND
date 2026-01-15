@@ -816,15 +816,6 @@
 
                         const now = this.time.now
                         if (now - this.lastFlapTime < this.flapCooldown) {
-                            // Visual feedback for ignored input: brief eye squint
-                            if (this.eyeLeft && this.eyeRight) {
-                                this.eyeLeft.scaleY = 0.5
-                                this.eyeRight.scaleY = 0.5
-                                this.time.delayedCall(100, () => {
-                                    this.eyeLeft.scaleY = 1.0
-                                    this.eyeRight.scaleY = 1.0
-                                })
-                            }
                             return
                         }
                         this.lastFlapTime = now
