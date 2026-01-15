@@ -374,21 +374,23 @@
                         this.physics.world.gravity.y = GameSettings.gameplay.gravity
 
                         // 2. Parallax Background System (TileSprites)
-                        // Far Layer: 0.1x speed (lighter gray background, renders behind)
-                        this.bgFar = this.add.tileSprite(GameSettings.canvas.width / 2 - 60, 0, 512, 1024, 'bg_far')
+                        // Texture is 1024px wide (512*2), so TileSprite should match
+                        // Scale to fit canvas: 720/1024
+                        const bgScale = GameSettings.canvas.width / 1024
+
+                        // Far Layer: lighter gray background
+                        this.bgFar = this.add.tileSprite(GameSettings.canvas.width / 2, 0, 1024, 2048, 'bg_far')
                             .setOrigin(0.5, 0)
                             .setScrollFactor(0)
                             .setDepth(-10)
-                            .setScale(GameSettings.canvas.width / 512) // Match canvas width exactly
+                            .setScale(bgScale)
 
-
-
-                        // Mid Layer: 0.3x speed (darker gray foreground)
-                        this.bgMid = this.add.tileSprite(GameSettings.canvas.width / 2 + 40, 0, 512, 1024, 'bg_mid')
+                        // Mid Layer: darker gray foreground
+                        this.bgMid = this.add.tileSprite(GameSettings.canvas.width / 2, 0, 1024, 2048, 'bg_mid')
                             .setOrigin(0.5, 0)
                             .setScrollFactor(0)
                             .setDepth(-9)
-                            .setScale(GameSettings.canvas.width / 512)
+                            .setScale(bgScale)
 
                         // 3. Create Groups
                         this.walls = this.physics.add.staticGroup()
@@ -696,8 +698,7 @@
                         midCtx.fillRect(texCenter - (midCenterBandW / 2), 0, midCenterBandW, texH)
 
                         // Side towers (always visible)
-                        // Left tower extended by 40 to compensate for +40 position shift
-                        midCtx.fillRect(texCenter - midTowerDist - midTowerWLeft - 40, 0, midTowerWLeft + 40, texH)
+                        midCtx.fillRect(texCenter - midTowerDist - midTowerWLeft, 0, midTowerWLeft, texH)
                         midCtx.fillRect(texCenter + midTowerDist, 0, midTowerWRight, texH)
 
                         // Small bridges at arch intervals with curved inward bottoms (arch shape)
