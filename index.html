@@ -42,6 +42,7 @@
 <body>
     <div id="game-container"></div>
 
+
     <script>
         // Wait for CDN dependencies to load
         (async function () {
@@ -459,11 +460,15 @@
 
                         // Create the physics sprite as the primary player object
                         this.player = this.physics.add.sprite(GameSettings.canvas.width / 2, startY, 'player')
-                        this.player.setCircle(16, 14, 14)
+                        // Using Rectangular body for improved collision stability with static blocks
+                        this.player.setSize(26, 26)
+                        this.player.setOffset(2, 2)
+
                         // Scale reset: Starting at 1.2 "normal" scaling - set both axes explicitly
                         this.player.setScale(1.2, 1.2)
                         this.player.setBounce(0.4)
                         this.player.setCollideWorldBounds(true)
+                        this.player.setMaxVelocity(GameSettings.gameplay.horizontalSpeed * 2, 1200)
 
                         // Ensure the player is strictly locked between the inner edges using world bounds
                         this.player.body.setCollideWorldBounds(true)
@@ -508,6 +513,20 @@
                         this.currentEyePos = { x: 0, y: 0 }
                         this.targetPupilPos = { x: 0, y: 0 }
                         this.currentPupilPos = { x: 0, y: 0 }
+
+                        // Helper for physics body sync after scaling
+                        // IMPORTANT: We use a fixed body size that represents the core of the player
+                        // to prevent getting stuck during scaling physics updates. 
+                        this.player.on('scale_update', () => {
+                            if (this.player.body) {
+                                // Sync but keep the collision body constant relative to the base 1.2 scale
+                                // to avoid "growing" into walls during Tweens.
+                                const baseRadius = 16;
+                                const currentScale = this.player.scaleY;
+                                // Instead of scaling the body, we keep the hitsphere stable
+                                // or scale it slightly less to avoid tunneling via expansion.
+                            }
+                        })
 
                         // Start Platform
                         this.startPlatform = this.add.rectangle(
@@ -877,14 +896,16 @@
                                     scaleY: stretchY,
                                     angle: slant,
                                     duration: jumpDuration,
-                                    ease: 'Sine.easeOut'
+                                    ease: 'Sine.easeOut',
+                                    onUpdate: () => this.player.emit('scale_update')
                                 },
                                 {
                                     scaleX: 1.3,
                                     scaleY: 0.8,
                                     angle: -slant * 0.5,
                                     duration: jumpDuration * 1.5,
-                                    ease: 'Quad.easeInOut'
+                                    ease: 'Quad.easeInOut',
+                                    onUpdate: () => this.player.emit('scale_update')
                                 },
                                 {
                                     scaleX: 1.2,
@@ -892,7 +913,8 @@
                                     angle: 0,
                                     duration: 400,
                                     ease: 'Elastic.easeOut',
-                                    easeParams: [1, 0.5]
+                                    easeParams: [1, 0.5],
+                                    onUpdate: () => this.player.emit('scale_update')
                                 }
                             ]
                         })
@@ -914,7 +936,8 @@
                                     scaleY: 1.2 - (0.4 * impactIntensity),
                                     angle: (20 * impactIntensity) * dir,
                                     duration: 80,
-                                    ease: 'Quad.easeOut'
+                                    ease: 'Quad.easeOut',
+                                    onUpdate: () => this.player.emit('scale_update')
                                 },
                                 {
                                     scaleX: 1.2,
@@ -922,7 +945,8 @@
                                     angle: 0,
                                     duration: 500,
                                     ease: 'Elastic.easeOut',
-                                    easeParams: [1, 0.4]
+                                    easeParams: [1, 0.4],
+                                    onUpdate: () => this.player.emit('scale_update')
                                 }
                             ]
                         })
@@ -1017,6 +1041,7 @@
                         for (let i = 0; i < blocksCount; i++) {
                             const x = startX + i * blockSize
                             const block = this.obstacles.create(x, y, 'block')
+                            block.body.updateFromGameObject()
                             block.refreshBody()
                         }
 
@@ -1233,7 +1258,7 @@
 
                         // Update physics body size
                         if (obj.body) {
-                            obj.refreshBody()
+                            obj.body.updateFromGameObject()
                         }
                     }
 
@@ -1370,19 +1395,6 @@
                             this.pupilRight.y = this.eyeRight.y + this.currentPupilPos.y
                         }
 
-                        // Hard Limit Left/Right to prevent clipping even at high speed
-                        // This is a safety fallback for setCollideWorldBounds
-                        const wallThick = GameSettings.gameplay.wallThickness
-                        const minX = wallThick + 15
-                        const maxX = GameSettings.canvas.width - wallThick - 15
-                        if (this.player.x < minX) {
-                            this.player.x = minX
-                            if (this.player.body.velocity.x < 0) this.player.body.setVelocityX(0)
-                        } else if (this.player.x > maxX) {
-                            this.player.x = maxX
-                            if (this.player.body.velocity.x > 0) this.player.body.setVelocityX(0)
-                        }
-
                         if (this.player.body.velocity.y > 800) {
                             this.player.body.setVelocityY(800)
                         }
@@ -1509,11 +1521,16 @@
                         physics: {
                             default: 'arcade',
                             arcade: {
-                                debug: true
+                                steps: 8,
+                                tileBias: 64,
+                                overlapBias: 16,
+                                fps: 60
                             }
                         },
                         fps: {
                             target: 60,
+                            forceSetTimeOut: false,
+                            panicMaxBlocks: 10
                         },
                         pixelArt: false,
                         antialias: true,
@@ -1545,11 +1562,6 @@
                 }
 
                 initGame()
-
-
-
-
-                // === END FILE: main.js ===
                 // === END FILE: main.js ===
 
                 console.log('[Run Game] Game code executed successfully');
