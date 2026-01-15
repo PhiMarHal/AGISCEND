@@ -14,6 +14,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
+            background: #ffffff;
         }
 
         body {
@@ -22,9 +23,14 @@
             align-items: center;
         }
 
+        #game-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
         canvas {
             outline: none;
-            margin: 0;
             display: block;
             max-width: 100%;
             max-height: 100%;
@@ -33,7 +39,7 @@
 </head>
 
 <body>
-
+    <div id="game-container"></div>
 
     <script>
         // Wait for CDN dependencies to load
@@ -435,8 +441,8 @@
                         // Create the physics sprite as the primary player object
                         this.player = this.physics.add.sprite(GameSettings.canvas.width / 2, startY, 'player')
                         this.player.setCircle(16, 2, 2)
-                        // Scale reset: Starting at 1.2 "normal" scaling
-                        this.player.setScale(1.2)
+                        // Scale reset: Starting at 1.2 "normal" scaling - set both axes explicitly
+                        this.player.setScale(1.2, 1.2)
                         this.player.setBounce(0.4)
                         this.player.setCollideWorldBounds(true)
 
@@ -463,12 +469,20 @@
                         this.pupilLeft = this.add.rectangle(0, 0, 6.6, 19.8, Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color)
                         this.pupilRight = this.add.rectangle(0, 0, 6.6, 19.8, Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color)
 
-                        // Add both whites and pupils to container
+                        // Add both whites and pupils to container - positioned at player center
                         this.playerEyes = this.add.container(0, 0, [
                             this.eyeLeft, this.eyeRight, this.pupilLeft, this.pupilRight
                         ])
 
                         this.playerEyes.setDepth(11)
+
+                        // Sync eye container position with player in postUpdate (after physics) for perfect sync
+                        this.events.on('postupdate', () => {
+                            if (this.player && this.playerEyes && !this.isGameOver) {
+                                this.playerEyes.x = this.player.x
+                                this.playerEyes.y = this.player.y
+                            }
+                        })
 
                         // Internal eye states for smooth movement
                         this.targetEyePos = { x: 0, y: 0 }
@@ -530,18 +544,55 @@
                         }).setOrigin(0.5).setDepth(20)
 
                         // 9. Camera setup
-                        this.cameras.main.startFollow(this.player, true, 0, 0.1, 0, 200)
+                        this.cameras.main.startFollow(this.player, true, 0, 0.7, 0, 200)
                         this.cameras.main.setDeadzone(0, 100)
 
                         // SDK Listeners
-                        if (window.FarcadeSDK) {
-                            window.FarcadeSDK.onToggleMute(({ isMuted }) => {
-                                if (this.sound) this.sound.mute = isMuted
-                            })
-                            window.FarcadeSDK.onPlayAgain(() => {
-                                this.scene.restart()
-                            })
+                        this.initRemixSDK()
+                    }
+
+                    // Check if running inside Remix (must be in iframe AND have Remix-specific parent)
+                    isInRemix() {
+                        if (!window.FarcadeSDK) return false
+                        if (window.self === window.top) return false
+
+                        // Check if parent origin matches known Remix/Farcade domains
+                        try {
+                            const parentOrigin = document.referrer
+                            const remixDomains = ['farcade.com', 'remix.com', 'farcade.io', 'remix.io']
+                            return remixDomains.some(domain => parentOrigin.includes(domain))
+                        } catch (e) {
+                            // If we can't check referrer, fall back to assuming not in Remix
+                            return false
                         }
+                    }
+
+                    initRemixSDK() {
+                        if (!window.FarcadeSDK) return
+
+                        // Signal ready when game loads
+                        if (window.FarcadeSDK.singlePlayer && window.FarcadeSDK.singlePlayer.actions) {
+                            window.FarcadeSDK.singlePlayer.actions.ready()
+                            console.log('Remix SDK: Game ready signal sent.')
+                        }
+
+                        // Handle play again requests from Remix
+                        window.FarcadeSDK.on('play_again', () => {
+                            console.log('Remix SDK: Play again requested.')
+                            this.restartGame()
+                        })
+
+                        // Handle mute/unmute requests from Remix
+                        window.FarcadeSDK.on('toggle_mute', (data) => {
+                            console.log('Remix SDK: Mute toggle requested, isMuted:', data.isMuted)
+                            if (this.sound) this.sound.mute = data.isMuted
+                        })
+
+                        console.log('Remix SDK: Event handlers registered.')
+                    }
+
+                    restartGame() {
+                        this.scene.restart()
                     }
 
                     generateTextures() {
@@ -553,7 +604,7 @@
                         const cPrimary = Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color
                         const cSecondary = Phaser.Display.Color.HexStringToColor(GameSettings.colors.secondary).color
 
-                        // Body
+                        // Body - 60x60 texture with scale=2 supersampling, displayed at 1.2x
                         pG.fillStyle(cPrimary)
                         pG.fillCircle(15 * scale, 15 * scale, 15 * scale)
 
@@ -1075,7 +1126,78 @@
 
                         if (this.playerEyes) this.playerEyes.setVisible(false)
 
+                        // Show game over UI only when NOT in Remix
+                        if (!this.isInRemix()) {
+                            this.showGameOverUI()
+                        }
+
                         this.endGame()
+                    }
+
+                    showGameOverUI() {
+                        // Semi-transparent overlay
+                        this.gameOverOverlay = this.add.rectangle(
+                            GameSettings.canvas.width / 2,
+                            GameSettings.canvas.height / 2,
+                            GameSettings.canvas.width,
+                            GameSettings.canvas.height,
+                            0x000000, 0.8
+                        ).setScrollFactor(0).setDepth(200)
+
+                        // Game Over text (bigger)
+                        this.gameOverText = this.add.text(
+                            GameSettings.canvas.width / 2,
+                            GameSettings.canvas.height / 2 - 120,
+                            'GAME OVER',
+                            {
+                                fontFamily: 'Arial',
+                                fontSize: '64px',
+                                fontStyle: 'bold',
+                                color: '#ffffff',
+                                stroke: '#000000',
+                                strokeThickness: 6
+                            }
+                        ).setOrigin(0.5).setScrollFactor(0).setDepth(201)
+
+                        // Final score - HUGE number only
+                        this.finalScoreText = this.add.text(
+                            GameSettings.canvas.width / 2,
+                            GameSettings.canvas.height / 2 + 20,
+                            '' + this.score,
+                            {
+                                fontFamily: 'Arial',
+                                fontSize: '96px',
+                                fontStyle: 'bold',
+                                color: '#ffffff',
+                                stroke: '#000000',
+                                strokeThickness: 4
+                            }
+                        ).setOrigin(0.5).setScrollFactor(0).setDepth(201)
+
+                        // Restart button (bigger, white with black text)
+                        this.restartButton = this.add.rectangle(
+                            GameSettings.canvas.width / 2,
+                            GameSettings.canvas.height / 2 + 160,
+                            280, 70,
+                            0xffffff
+                        ).setScrollFactor(0).setDepth(201).setInteractive({ useHandCursor: true })
+
+                        this.restartButtonText = this.add.text(
+                            GameSettings.canvas.width / 2,
+                            GameSettings.canvas.height / 2 + 160,
+                            'PLAY AGAIN',
+                            {
+                                fontFamily: 'Arial',
+                                fontSize: '32px',
+                                fontStyle: 'bold',
+                                color: '#000000'
+                            }
+                        ).setOrigin(0.5).setScrollFactor(0).setDepth(202)
+
+                        // Handle restart button click
+                        this.restartButton.on('pointerdown', () => {
+                            this.restartGame()
+                        })
                     }
 
                     update(time, delta) {
@@ -1089,9 +1211,6 @@
 
                         // Position eyes relative to player
                         if (this.player && this.playerEyes) {
-                            this.playerEyes.x = this.player.x
-                            this.playerEyes.y = this.player.y
-
                             // Organic Smooth Eye Movement logic
                             // Look towards horizontal velocity
                             const lookVelX = Phaser.Math.Clamp(this.player.body.velocity.x / 20, -6, 6)
@@ -1103,18 +1222,18 @@
                                 this.targetEyePos.y = lookVelY + (Math.random() - 0.5) * 4
                                 this.targetPupilPos.x = (Math.random() - 0.5) * 4
                                 this.targetPupilPos.y = (Math.random() - 0.5) * 4
-                            } else if (time % 2000 < 2000) {
+                            } else {
                                 this.targetEyePos.x = lookVelX
                                 this.targetEyePos.y = lookVelY
                                 this.targetPupilPos.x = lookVelX * 0.5
                                 this.targetPupilPos.y = lookVelY * 0.5
                             }
 
-                            // Lerp positions for organic smoothness
-                            this.currentEyePos.x += (this.targetEyePos.x - this.currentEyePos.x) * 0.1
-                            this.currentEyePos.y += (this.targetEyePos.y - this.currentEyePos.y) * 0.1
-                            this.currentPupilPos.x += (this.targetPupilPos.x - this.currentPupilPos.x) * 0.1
-                            this.currentPupilPos.y += (this.targetPupilPos.y - this.currentPupilPos.y) * 0.1
+                            // Smooth lerp for organic eye movement
+                            this.currentEyePos.x += (this.targetEyePos.x - this.currentEyePos.x) * 0.15
+                            this.currentEyePos.y += (this.targetEyePos.y - this.currentEyePos.y) * 0.15
+                            this.currentPupilPos.x += (this.targetPupilPos.x - this.currentPupilPos.x) * 0.15
+                            this.currentPupilPos.y += (this.targetPupilPos.y - this.currentPupilPos.y) * 0.15
 
                             this.eyeLeft.x = -24 + this.currentEyePos.x
                             this.eyeLeft.y = -4 + this.currentEyePos.y
@@ -1250,6 +1369,7 @@
                 function initGame() {
                     const config = {
                         type: Phaser.WEBGL,
+                        parent: 'game-container',
                         width: GameSettings.canvas.width,
                         height: GameSettings.canvas.height,
                         scale: {
@@ -1270,8 +1390,8 @@
                             target: 60,
                         },
                         pixelArt: false,
-                        antialias: false,
-                        roundPixels: true,
+                        antialias: true,
+                        roundPixels: false,
                     }
 
                     try {
