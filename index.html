@@ -44,6 +44,7 @@
 
 
 
+
     <script>
         // Wait for CDN dependencies to load
         (async function () {
@@ -580,7 +581,7 @@
                         this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this)
 
                         // 7. Input
-                        this.input.on('pointerdown', this.flap, this)
+                        // Note: We move manual continuous input checking to update()
                         this.input.keyboard.on('keydown-SPACE', this.flap, this)
 
                         // 8. UI
@@ -1274,7 +1275,7 @@
                     }
 
                     shrinkObject(obj, canShrink = false) {
-                        if (!obj || !canShrink || obj.displayHeight < 10) return
+                        if (!obj || !canShrink) return
 
                         // Side walls should not shrink
                         if (this.walls.contains(obj)) return
@@ -1286,13 +1287,29 @@
                         }
                         obj.lastShrinkTime = now
 
-                        // Shrink by 8% (0.92 multiplier)
-                        const newScale = obj.scaleX * 0.92
-                        obj.setScale(newScale)
+                        // Initialize hit counter and original scale if they don't exist
+                        if (obj.hitCount === undefined) {
+                            obj.hitCount = 0
+                            obj.originalScale = obj.scaleX
+                        }
 
-                        // Update physics body size
-                        if (obj.body) {
-                            obj.body.updateFromGameObject()
+                        // Increment hit count
+                        obj.hitCount++
+
+                        // Calculate new scale: loss of 10% of original size per hit
+                        const newScale = obj.originalScale * (1 - (obj.hitCount * 0.1))
+
+                        if (newScale <= 0.01 || obj.hitCount >= 10) {
+                            // Destroy object after 10 hits or when scale reaches 0
+                            obj.destroy()
+                        } else {
+                            // Apply shrinking
+                            obj.setScale(newScale)
+
+                            // Update physics body size
+                            if (obj.body) {
+                                obj.body.updateFromGameObject()
+                            }
                         }
                     }
 
@@ -1385,6 +1402,11 @@
 
                     update(time, delta) {
                         if (this.isGameOver) return
+
+                        // Continuous input: Check if mouse or finger is down
+                        if (this.input.activePointer.isDown) {
+                            this.flap()
+                        }
 
                         // Update Parallax TileSprites with specific scroll factors
                         if (this.bgFar && this.bgMid) {
