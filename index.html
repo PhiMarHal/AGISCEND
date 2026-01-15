@@ -125,10 +125,10 @@
                         gravity: 1600,
                         jumpForce: 650,
                         horizontalSpeed: 350,
-                        baseHazardSpeed: 100, // Base spike speed
-                        hazardSpeed: 100, // Current spike speed (will be reset at intervals)
-                        hazardSpeedGrowth: 4.0, // Speed increase per second
-                        maxHazardSpeed: 500, // Cap at max theoretical player speed
+                        baseHazardSpeed: 50, // Base spike speed
+                        hazardSpeed: 50, // Current spike speed (will be reset at intervals)
+                        hazardSpeedGrowth: 2.0, // Speed increase per second
+                        maxHazardSpeed: 200, // Cap below half max theoretical player speed
                         obstacleSize: 45,
                         wallThickness: 35,
                         coinSpawnRate: 0.8,
@@ -382,7 +382,12 @@
                         this.lastCheckpointReached = 0
 
                         // Interval system state
-                        this.intervalAltitudes = [10000, 30000, 60000, 100000, 150000, 210000, 280000, 360000] // Pre-calculated intervals
+                        this.intervalAltitudes = []
+                        for (let n = 1; n <= 20; n++) {
+                            const triangleNumber = (n * (n + 1)) / 2
+                            this.intervalAltitudes.push(triangleNumber * 10000)
+                        }
+
                         this.lastIntervalAltitude = 0 // For spawn rate reset calculation
                         this.nextIntervalIndex = 0 // Index into intervalAltitudes
                         this.generatedIntervalBarriers = new Set() // Track which interval barriers have been generated
@@ -433,7 +438,7 @@
                         this.surgeTargetY = this.spikeContainer.y
 
                         this.spikes = []
-                        const spikeCount = 12
+                        const spikeCount = 8
                         const totalSpikeSpace = GameSettings.canvas.width
                         const spikeWidth = totalSpikeSpace / (spikeCount + 1)
 
@@ -682,7 +687,7 @@
 
                         // Single Spike Texture
                         const sG = this.make.graphics()
-                        const spikeW = 60
+                        const spikeW = 64
                         sG.fillStyle(Phaser.Display.Color.HexStringToColor(GameSettings.colors.hazard).color)
                         sG.fillTriangle((spikeW / 2) * scale, 0, 0, 64 * scale, spikeW * scale, 64 * scale)
                         sG.generateTexture('spike_single', spikeW * scale, 64 * scale)
@@ -1032,20 +1037,25 @@
                         const width = GameSettings.canvas.width
                         const wallThick = GameSettings.gameplay.wallThickness
                         const blockSize = GameSettings.gameplay.obstacleSize
+                        const gap = 48
 
-                        // Calculate how many blocks fit across the playable area
+                        // Calculate how many blocks fit across the playable area with gaps
                         const playableWidth = width - (wallThick * 2)
-                        const blocksCount = Math.floor(playableWidth / blockSize)
-                        const startX = wallThick + (playableWidth - (blocksCount * blockSize)) / 2 + blockSize / 2
+                        // (count * blockSize) + ((count - 1) * gap) <= playableWidth
+                        // count * (blockSize + gap) - gap <= playableWidth
+                        const blocksCount = Math.floor((playableWidth + gap) / (blockSize + gap))
+
+                        const totalBlocksWidth = (blocksCount * blockSize) + ((blocksCount - 1) * gap)
+                        const startX = wallThick + (playableWidth - totalBlocksWidth) / 2 + blockSize / 2
 
                         for (let i = 0; i < blocksCount; i++) {
-                            const x = startX + i * blockSize
+                            const x = startX + i * (blockSize + gap)
                             const block = this.obstacles.create(x, y, 'block')
                             block.body.updateFromGameObject()
                             block.refreshBody()
                         }
 
-                        console.log(`[INTERVAL] Spawned full row of ${blocksCount} squares at Y=${y}`)
+                        console.log(`[INTERVAL] Spawned full row of ${blocksCount} squares at Y=${y} with ${gap}px gaps`)
                     }
 
                     // Spawn 4 rows of triangle coins above a given Y position
