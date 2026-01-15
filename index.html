@@ -34,6 +34,7 @@
 
 <body>
 
+
     <script>
         // Wait for CDN dependencies to load
         (async function () {
@@ -487,9 +488,11 @@
                         this.physics.add.collider(this.player, this.startPlatform)
 
                         // 5. Initial Level Generation
-                        this.highestGeneratedY = GameSettings.canvas.height
-                        this.lastChunkY = GameSettings.canvas.height
-                        this.generateChunk(startY - 1000)
+                        // Ensure the walls start from the very bottom of the screen to cover the area under the spikes
+                        // We generate slightly below canvas height (e.g. + 200) to ensure spikes/death area is covered
+                        this.highestGeneratedY = GameSettings.canvas.height + 200
+                        this.lastChunkY = GameSettings.canvas.height + 200
+                        this.generateChunk(startY - 2000)
 
                         // 6. Config Collisions
                         this.physics.add.collider(this.player, this.walls, (p, wall) => {
@@ -1300,6 +1303,7 @@
 
 
 
+                // === END FILE: main.js ===
                 // === END FILE: main.js ===
 
                 console.log('[Run Game] Game code executed successfully');
