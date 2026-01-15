@@ -43,6 +43,7 @@
     <div id="game-container"></div>
 
 
+
     <script>
         // Wait for CDN dependencies to load
         (async function () {
@@ -434,15 +435,26 @@
 
                         // Spikes Container for undulation
                         this.spikeContainer = this.add.container(0, GameSettings.canvas.height + 50)
+
+                        // Add background rectangle to the container to mask individual spikes
+                        // It should start at a lower position (e.g. y=30) so the top of the spikes is visible.
+                        const spikeBgHeight = 2000
+                        const spikeBg = this.add.rectangle(0, 45, GameSettings.canvas.width, spikeBgHeight, 0x000000)
+                        spikeBg.setOrigin(0, 0) // Positioned at y=45 within container
+
                         // Surge smoothing logic helper
                         this.surgeTargetY = this.spikeContainer.y
 
                         this.spikes = []
-                        const spikeCount = 8
+                        const spikeCount = 12 // Increased count for better visual density
                         const totalSpikeSpace = GameSettings.canvas.width
                         const spikeWidth = totalSpikeSpace / (spikeCount + 1)
 
+                        // Add the black base first so it sits behind the undulation
+                        this.spikeContainer.add(spikeBg)
+
                         for (let i = 0; i < spikeCount; i++) {
+                            // Positioned at y=0, with the base extending down to y=64
                             const s = this.add.image((i + 1) * spikeWidth, 0, 'spike_single').setOrigin(0.5, 0)
                             this.spikeContainer.add(s)
                             this.spikes.push(s)
@@ -451,8 +463,9 @@
                         this.physics.add.existing(this.spikeContainer)
                         this.spikeContainer.body.setAllowGravity(false)
                         this.spikeContainer.body.setImmovable(true)
-                        this.spikeContainer.body.setSize(GameSettings.canvas.width, 40)
-                        this.spikeContainer.body.setOffset(0, 20)
+                        // Physics body starts at the tip of the spikes (y=0 in container)
+                        this.spikeContainer.body.setSize(GameSettings.canvas.width, 100)
+                        this.spikeContainer.body.setOffset(0, 0)
 
                         // 4. Create Player
                         const startY = GameSettings.canvas.height - 200
@@ -1090,7 +1103,7 @@
                         console.log(`[INTERVAL] Spawned 4 rows of triangles (${totalCoins} total) above Y=${baseY}`)
                     }
 
-                    // Handle reaching an interval milestone (spike reset only, barriers are pre-generated)
+                    // Handle reaching an interval milestone (spike reset logic)
                     handleIntervalReached(intervalAltitude) {
                         console.log(`[INTERVAL] ===== PLAYER REACHED INTERVAL at ${intervalAltitude}m =====`)
 
@@ -1098,7 +1111,7 @@
                         const startY = GameSettings.canvas.height - 200
                         const intervalY = startY - intervalAltitude
 
-                        // Update the last interval for spawn rate calculations
+                        // Update the last interval
                         this.lastIntervalAltitude = intervalAltitude
 
                         // Reset spike speed to base
@@ -1106,10 +1119,21 @@
                         this.spikeMaxSpeedReached = false
                         console.log(`[INTERVAL] Spike speed reset to ${GameSettings.gameplay.hazardSpeed}`)
 
-                        // Set spikes to 500m below this point
-                        const spikeY = intervalY + 500
-                        this.surgeTargetY = spikeY
-                        console.log(`[INTERVAL] Spikes set to 500m below (Y=${spikeY})`)
+                        // Teleport spikes to 500m below player IF they are currently further than 500m away.
+                        // If they are closer than 500m, keep them where they are (don't give a free pass).
+                        const safeguardDistance = 500
+                        const targetSpikeY = this.player.y + safeguardDistance
+
+                        // In Phaser, higher Y is lower on screen. 
+                        // If current surgeTargetY is greater than target (meaning it's further down than 500m)...
+                        if (this.surgeTargetY > targetSpikeY) {
+                            this.surgeTargetY = targetSpikeY
+                            // Snap current container Y as well to ensure it doesn't stay behind if player ascended very fast
+                            this.spikeContainer.y = targetSpikeY
+                            console.log(`[INTERVAL] Spikes were far away (${Math.floor(this.spikeContainer.y - this.player.y)}m). Resetting surge target closer to player (Y=${targetSpikeY})`)
+                        } else {
+                            console.log(`[INTERVAL] Spikes are already close (${Math.floor(this.spikeContainer.y - this.player.y)}m). Maintaining pressure.`)
+                        }
 
                         // Move to next interval
                         this.nextIntervalIndex++
@@ -1572,6 +1596,7 @@
                 }
 
                 initGame()
+                // === END FILE: main.js ===
                 // === END FILE: main.js ===
 
                 console.log('[Run Game] Game code executed successfully');
