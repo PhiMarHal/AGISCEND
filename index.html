@@ -445,8 +445,8 @@
                         this.player.setDepth(10)
 
                         // Eye Design: Elongated ovals with clear black outlines
-                        const eyeWidth = 42.35; // ~10% larger than previous 38.5
-                        const eyeHeight = 29.04; // ~10% larger than previous 26.4
+                        const eyeWidth = 42; // ~10% larger than previous 38.5
+                        const eyeHeight = 29; // ~10% larger than previous 26.4
                         const outlineColor = 0x000000;
                         const outlineThickness = 3;
 
@@ -618,9 +618,9 @@
 
                         // Draw opaque parts in light gray
                         farCtx.fillStyle = '#d0d0d0'
-                        const farCenterBandW = 100 * scale
+                        const farCenterBandW = 120 * scale
                         const farTowerW = 60 * scale
-                        const farTowerDist = 160 * scale
+                        const farTowerDist = 180 * scale
 
                         // Center band
                         farCtx.fillRect(texCenter - (farCenterBandW / 2), 0, farCenterBandW, texH)
@@ -689,10 +689,10 @@
 
                         // Draw ONLY the opaque parts (bridges and towers) in gray
                         midCtx.fillStyle = '#b0b0b0'
-                        const midCenterBandW = 140 * scale
+                        const midCenterBandW = 80 * scale
                         const midTowerWLeft = 60 * scale
                         const midTowerWRight = 60 * scale
-                        const midTowerDist = 210 * scale
+                        const midTowerDist = 200 * scale
 
                         // Center band (always visible)
                         midCtx.fillRect(texCenter - (midCenterBandW / 2), 0, midCenterBandW, texH)
