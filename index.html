@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <script src="https://cdn.jsdelivr.net/npm/@farcade/game-sdk@0.3.0/dist/index.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.87.0/dist/phaser.min.js"></script>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            outline: none;
+            margin: 0;
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+
+    <script>
+        // Wait for CDN dependencies to load
+        (async function () {
+            const expectedGlobals = ["FarcadeSDK", "Phaser"];
+            console.log('[Run Game] Waiting for CDN dependencies:', expectedGlobals);
+
+            // Wait for expected global objects from CDN scripts
+            const maxWaitTime = 10000;
+            const checkInterval = 50;
+            let elapsed = 0;
+            let lastLogTime = 0;
+
+            while (!(window.FarcadeSDK && window.Phaser) && elapsed < maxWaitTime) {
+                if (elapsed - lastLogTime >= 1000) {
+                    const available = [window.FarcadeSDK ? 'FarcadeSDK' : null, window.Phaser ? 'Phaser' : null].filter(Boolean);
+                    console.log(`[Run Game] Waiting... (${elapsed}ms) Available:`, available);
+                    lastLogTime = elapsed;
+                }
+
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+                elapsed += checkInterval;
+            }
+
+            if (!(window.FarcadeSDK && window.Phaser)) {
+                console.error('[Run Game] CDN dependencies not loaded in time. Expected:', expectedGlobals);
+                return;
+            }
+
+            console.log('[Run Game] All dependencies loaded!');
+            console.log('[Run Game] Phaser:', typeof window.Phaser, window.Phaser?.VERSION);
+            console.log('[Run Game] FarcadeSDK:', typeof window.FarcadeSDK, Object.keys(window.FarcadeSDK || {}));
+
+            // Additional wait for SDK mock to be fully ready
+            if (window.FarcadeSDK) {
+                let sdkReadyCount = 0;
+                while (!window.FarcadeSDK.singlePlayer && sdkReadyCount < 100) {
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    sdkReadyCount++;
+                }
+                if (window.FarcadeSDK.singlePlayer) {
+                    console.log('[Run Game] FarcadeSDK.singlePlayer ready');
+                }
+            }
+
+            console.log('[Run Game] Starting game execution...');
+
+            // Embed source map
+            window.__REMIX_SOURCE_MAP__ = { "main.js": { "file": "main.js", "offset": 0 } };
+
+            window.addEventListener('unhandledrejection', (event) => {
+                console.error('[Run Game] Unhandled promise rejection:', event.reason);
+            });
+
+            // Execute game code
+            try {
+
+                // === FILE: main.js ===
+
+
+
+
+                // NO Phaser.js import — Phaser is loaded via CDN and available on the window object
+
+                /**
+                 * Game Settings
+                 * Centralized configuration for all tunable game parameters
+                 */
+                const GameSettings = {
+                    canvas: {
+                        width: 720,
+                        height: 1080,
+                    },
+                    colors: {
+                        background: "#ffffff",
+                        primary: "#000000",
+                        secondary: "#ffffff", // Eye whites
+                        hazard: "#000000"
+                    },
+                    gameplay: {
+                        gravity: 1600,
+                        jumpForce: 650,
+                        horizontalSpeed: 350,
+                        hazardSpeed: 100,
+                        obstacleSize: 45,
+                        wallThickness: 35,
+                        coinSpawnRate: 0.8, // Doubled from 0.4
+                        checkpointInterval: 2000,
+                        minDistance: 160 // Minimum distance between obstacles
+                    },
+                    visuals: {
+                        heroBaseScale: 1.2
+                    },
+                    _meta: {
+                        "colors.background": { type: "color", label: "Background Color" },
+                        "colors.primary": { type: "color", label: "Main Object Color" },
+                        "colors.hazard": { type: "color", label: "Spike Color" },
+                        "gameplay.gravity": { type: "number", label: "Gravity", min: 500, max: 3000 },
+                        "gameplay.jumpForce": { type: "number", label: "Flap Power", min: 200, max: 1000 },
+                        "gameplay.horizontalSpeed": { type: "number", label: "Move Speed", min: 100, max: 800 },
+                        "gameplay.hazardSpeed": { type: "number", label: "Rising Speed", min: 10, max: 400 },
+                        "gameplay.minDistance": { type: "number", label: "Min Block Spacing", min: 100, max: 300 }
+                    }
+                }
+
+                /**
+                 * Config Manager
+                 * Handles runtime configuration updates from the editor via postMessage.
+                 */
+                const ConfigManager = {
+                    gameInstance: null,
+                    gameScene: null,
+                    metadata: GameSettings._meta || {},
+
+                    init(gameInstance, gameScene) {
+                        this.gameInstance = gameInstance
+                        this.gameScene = gameScene
+                        this.loadFromStaticConfig()
+                        window.addEventListener('message', (event) => {
+                            this.handleMessage(event)
+                        })
+                        console.log('[ConfigManager] Initialized')
+                    },
+
+                    loadFromStaticConfig() {
+                        try {
+                            const configScript = document.getElementById('game-config')
+                            if (configScript && configScript.textContent) {
+                                const staticConfig = JSON.parse(configScript.textContent)
+                                this.applyConfig(staticConfig, false)
+                            }
+                        } catch (error) {
+                            console.warn('[ConfigManager] Failed to load static config:', error)
+                        }
+                    },
+
+                    handleMessage(event) {
+                        const isFromParent = event.source === window.parent
+                        const isFromSameWindow = event.source === window
+                        const isWebViewContext = typeof window.ReactNativeWebView !== 'undefined'
+
+                        if (isWebViewContext) {
+                            if (!isFromSameWindow && event.origin !== 'react-native://webview') {
+                                return
+                            }
+                        } else {
+                            if (!isFromParent) {
+                                return
+                            }
+                        }
+
+                        if (!event.data || typeof event.data !== 'object') {
+                            return
+                        }
+
+                        const { type, path, value, config } = event.data
+
+                        switch (type) {
+                            case 'GET_CONFIG_SCHEMA':
+                                this.sendSchema()
+                                break
+                            case 'GET_CONFIG_VALUES':
+                                this.sendValues()
+                                break
+                            case 'UPDATE_CONFIG_PROPERTY':
+                                if (path && value !== undefined) {
+                                    this.updateProperty(path, value)
+                                }
+                                break
+                            case 'UPDATE_CONFIG':
+                                if (config) {
+                                    this.applyConfig(config, true)
+                                }
+                                break
+                        }
+                    },
+
+                    getConfigurableProperties() {
+                        const properties = {}
+                        const meta = this.metadata
+
+                        const scan = (obj, prefix = '') => {
+                            for (const [key, val] of Object.entries(obj)) {
+                                if (key === '_meta') continue
+                                const path = prefix ? `${prefix}.${key}` : key
+                                if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+                                    scan(val, path)
+                                } else {
+                                    const valueType = this.detectType(val)
+                                    properties[path] = {
+                                        type: meta[path]?.type || valueType,
+                                        label: meta[path]?.label || this.formatLabel(key),
+                                        default: val,
+                                        ...(meta[path] || {}),
+                                    }
+                                }
+                            }
+                        }
+
+                        scan(GameSettings)
+                        return properties
+                    },
+
+                    detectType(value) {
+                        if (typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value)) {
+                            return 'color'
+                        }
+                        if (typeof value === 'number') {
+                            return 'number'
+                        }
+                        if (typeof value === 'boolean') {
+                            return 'boolean'
+                        }
+                        return 'string'
+                    },
+
+                    formatLabel(key) {
+                        return key
+                            .split(/(?=[A-Z])/)
+                            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                            .join(' ')
+                    },
+
+                    getCurrentValues() {
+                        const values = {}
+                        const properties = this.getConfigurableProperties()
+                        for (const path of Object.keys(properties)) {
+                            values[path] = this.getPropertyValue(path)
+                        }
+                        return values
+                    },
+
+                    getPropertyValue(path) {
+                        const parts = path.split('.')
+                        let value = GameSettings
+                        for (const part of parts) {
+                            if (value && typeof value === 'object') {
+                                value = value[part]
+                            } else {
+                                return undefined
+                            }
+                        }
+                        return value
+                    },
+
+                    updateProperty(path, value) {
+                        const parts = path.split('.')
+                        let current = GameSettings
+                        for (let i = 0; i < parts.length - 1; i++) {
+                            if (!current[parts[i]]) {
+                                current[parts[i]] = {}
+                            }
+                            current = current[parts[i]]
+                        }
+                        const key = parts[parts.length - 1]
+                        const oldValue = current[key]
+                        current[key] = value
+                        this.applyPropertyChange(path, value, oldValue)
+                        this.notifyPropertyUpdated(path, value)
+                    },
+
+                    applyPropertyChange(path, value, oldValue) {
+                        if (!this.gameScene) return
+                        if (typeof this.gameScene.onConfigUpdate === 'function') {
+                            this.gameScene.onConfigUpdate(path, value, oldValue)
+                        }
+                        if (path.startsWith('colors.')) {
+                            if (typeof this.gameScene.updateColor === 'function') {
+                                const colorName = path.split('.')[1]
+                                this.gameScene.updateColor(colorName, value)
+                            }
+                        }
+                    },
+
+                    applyConfig(config, notifyParent = true) {
+                        for (const [key, value] of Object.entries(config)) {
+                            if (key === '_meta') continue
+                            if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                                if (!GameSettings[key]) {
+                                    GameSettings[key] = {}
+                                }
+                                Object.assign(GameSettings[key], value)
+                            } else {
+                                GameSettings[key] = value
+                            }
+                        }
+                        const properties = this.getConfigurableProperties()
+                        for (const path of Object.keys(properties)) {
+                            const value = this.getPropertyValue(path)
+                            this.applyPropertyChange(path, value, undefined)
+                        }
+                        if (notifyParent) {
+                            this.sendValues()
+                        }
+                    },
+
+                    sendSchema() {
+                        const schema = this.getConfigurableProperties()
+                        window.parent.postMessage({ type: 'CONFIG_SCHEMA', schema }, '*')
+                    },
+
+                    sendValues() {
+                        const values = this.getCurrentValues()
+                        window.parent.postMessage({ type: 'CONFIG_VALUES', values }, '*')
+                    },
+
+                    notifyPropertyUpdated(path, value) {
+                        window.parent.postMessage({ type: 'CONFIG_PROPERTY_UPDATED', path, value }, '*')
+                    },
+                }
+
+                /**
+                 * GameScene - Main game scene
+                 */
+                class GameScene extends Phaser.Scene {
+                    constructor() {
+                        super({ key: 'GameScene' })
+                        this.resetGameState()
+                    }
+
+                    resetGameState() {
+                        this.score = 0
+                        this.isGameOver = false
+                        this.hasStarted = false
+                        this.highestGeneratedY = 0
+                        this.lastObstacleY = 0
+                        this.nextFlapDirection = 1
+                        this.lastFlapTime = 0
+                        this.flapCooldown = 200
+                        this.lastCheckpointReached = 0
+                    }
+
+                    create() {
+                        this.generateTextures()
+                        this.resetGameState()
+
+                        // 1. Setup World
+                        this.cameras.main.setBackgroundColor(GameSettings.colors.background)
+                        this.physics.world.gravity.y = GameSettings.gameplay.gravity
+
+                        // 2. Parallax Background System (TileSprites)
+                        // Far Layer: 0.1x speed (lighter gray background, renders behind)
+                        this.bgFar = this.add.tileSprite(GameSettings.canvas.width / 2 - 60, 0, 512, 1024, 'bg_far')
+                            .setOrigin(0.5, 0)
+                            .setScrollFactor(0)
+                            .setDepth(-10)
+                            .setScale(GameSettings.canvas.width / 512) // Match canvas width exactly
+
+
+
+                        // Mid Layer: 0.3x speed (darker gray foreground)
+                        this.bgMid = this.add.tileSprite(GameSettings.canvas.width / 2 + 40, 0, 512, 1024, 'bg_mid')
+                            .setOrigin(0.5, 0)
+                            .setScrollFactor(0)
+                            .setDepth(-9)
+                            .setScale(GameSettings.canvas.width / 512)
+
+                        // 3. Create Groups
+                        this.walls = this.physics.add.staticGroup()
+                        this.obstacles = this.physics.add.staticGroup()
+                        this.coins = this.physics.add.group({
+                            allowGravity: false,
+                            immovable: true
+                        })
+
+                        // Spikes Container for undulation
+                        this.spikeContainer = this.add.container(0, GameSettings.canvas.height + 50)
+                        // Surge smoothing logic helper
+                        this.surgeTargetY = this.spikeContainer.y
+
+                        this.spikes = []
+                        const spikeCount = 12
+                        const totalSpikeSpace = GameSettings.canvas.width
+                        const spikeWidth = totalSpikeSpace / (spikeCount + 1)
+
+                        for (let i = 0; i < spikeCount; i++) {
+                            const s = this.add.image((i + 1) * spikeWidth, 0, 'spike_single').setOrigin(0.5, 0)
+                            this.spikeContainer.add(s)
+                            this.spikes.push(s)
+                        }
+
+                        this.physics.add.existing(this.spikeContainer)
+                        this.spikeContainer.body.setAllowGravity(false)
+                        this.spikeContainer.body.setImmovable(true)
+                        this.spikeContainer.body.setSize(GameSettings.canvas.width, 40)
+                        this.spikeContainer.body.setOffset(0, 20)
+
+                        // 4. Create Player
+                        const startY = GameSettings.canvas.height - 200
+
+                        // Safety boundaries: Physical world locking
+                        const wallThick = GameSettings.gameplay.wallThickness
+                        // We set the world bounds to the space BETWEEN the walls.
+                        // Width = Canvas Width minus both walls. X offset = thickness of one wall.
+                        this.physics.world.setBounds(wallThick, -2000000, GameSettings.canvas.width - (wallThick * 2), 2000000 + GameSettings.canvas.height)
+
+                        // Create the physics sprite as the primary player object
+                        this.player = this.physics.add.sprite(GameSettings.canvas.width / 2, startY, 'player')
+                        this.player.setCircle(16, 2, 2)
+                        // Scale reset: Starting at 1.2 "normal" scaling
+                        this.player.setScale(1.2)
+                        this.player.setBounce(0.4)
+                        this.player.setCollideWorldBounds(true)
+
+                        // Ensure the player is strictly locked between the inner edges using world bounds
+                        this.player.body.setCollideWorldBounds(true)
+
+                        this.player.setDepth(10)
+
+                        // Eye Design: Elongated ovals with clear black outlines
+                        const eyeWidth = 42.35; // ~10% larger than previous 38.5
+                        const eyeHeight = 29.04; // ~10% larger than previous 26.4
+                        const outlineColor = 0x000000;
+                        const outlineThickness = 3;
+
+                        // Create Left Eye with Outline
+                        this.eyeLeft = this.add.ellipse(-24, -4, eyeWidth, eyeHeight, Phaser.Display.Color.HexStringToColor(GameSettings.colors.secondary).color)
+                        this.eyeLeft.setStrokeStyle(outlineThickness, outlineColor)
+
+                        // Create Right Eye with Outline
+                        this.eyeRight = this.add.ellipse(24, -4, eyeWidth, eyeHeight, Phaser.Display.Color.HexStringToColor(GameSettings.colors.secondary).color)
+                        this.eyeRight.setStrokeStyle(outlineThickness, outlineColor)
+
+                        // Cat Pupils: Vertical slit (black part)
+                        this.pupilLeft = this.add.rectangle(0, 0, 6.6, 19.8, Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color)
+                        this.pupilRight = this.add.rectangle(0, 0, 6.6, 19.8, Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color)
+
+                        // Add both whites and pupils to container
+                        this.playerEyes = this.add.container(0, 0, [
+                            this.eyeLeft, this.eyeRight, this.pupilLeft, this.pupilRight
+                        ])
+
+                        this.playerEyes.setDepth(11)
+
+                        // Internal eye states for smooth movement
+                        this.targetEyePos = { x: 0, y: 0 }
+                        this.currentEyePos = { x: 0, y: 0 }
+                        this.targetPupilPos = { x: 0, y: 0 }
+                        this.currentPupilPos = { x: 0, y: 0 }
+
+                        // Start Platform
+                        this.startPlatform = this.add.rectangle(
+                            GameSettings.canvas.width / 2,
+                            startY + 50,
+                            100,
+                            20,
+                            Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color
+                        )
+                        this.physics.add.existing(this.startPlatform, true)
+                        this.physics.add.collider(this.player, this.startPlatform)
+
+                        // 5. Initial Level Generation
+                        this.highestGeneratedY = GameSettings.canvas.height
+                        this.lastChunkY = GameSettings.canvas.height
+                        this.generateChunk(startY - 1000)
+
+                        // 6. Config Collisions
+                        this.physics.add.collider(this.player, this.walls, (p, wall) => {
+                            this.cameras.main.shake(100, 0.005)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                        })
+                        this.physics.add.collider(this.player, this.obstacles, (p, obstacle) => {
+                            this.cameras.main.shake(100, 0.005)
+                            this.shrinkObject(obstacle, true)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                        })
+                        this.physics.add.overlap(this.player, this.spikeContainer, this.handleDeath, null, this)
+                        this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this)
+
+                        // 7. Input
+                        this.input.on('pointerdown', this.flap, this)
+                        this.input.keyboard.on('keydown-SPACE', this.flap, this)
+
+                        // 8. UI
+                        this.scoreText = this.add.text(GameSettings.canvas.width / 2, 50, '0', {
+                            fontFamily: 'Arial',
+                            fontSize: '48px',
+                            fontStyle: 'bold',
+                            color: GameSettings.colors.primary,
+                            stroke: '#ffffff',
+                            strokeThickness: 6
+                        }).setOrigin(0.5).setScrollFactor(0).setDepth(100)
+
+                        this.tutorialText = this.add.text(GameSettings.canvas.width / 2, GameSettings.canvas.height / 2 + 100, 'TAP TO FLAP', {
+                            fontFamily: 'Arial',
+                            fontSize: '32px',
+                            color: GameSettings.colors.primary
+                        }).setOrigin(0.5).setDepth(20)
+
+                        // 9. Camera setup
+                        this.cameras.main.startFollow(this.player, true, 0, 0.1, 0, 200)
+                        this.cameras.main.setDeadzone(0, 100)
+
+                        // SDK Listeners
+                        if (window.FarcadeSDK) {
+                            window.FarcadeSDK.onToggleMute(({ isMuted }) => {
+                                if (this.sound) this.sound.mute = isMuted
+                            })
+                            window.FarcadeSDK.onPlayAgain(() => {
+                                this.scene.restart()
+                            })
+                        }
+                    }
+
+                    generateTextures() {
+                        // High res textures scaled down for sharpness
+                        const scale = 2
+
+                        // Player Texture
+                        const pG = this.make.graphics()
+                        const cPrimary = Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color
+                        const cSecondary = Phaser.Display.Color.HexStringToColor(GameSettings.colors.secondary).color
+
+                        // Body
+                        pG.fillStyle(cPrimary)
+                        pG.fillCircle(15 * scale, 15 * scale, 15 * scale)
+
+                        pG.generateTexture('player', 30 * scale, 30 * scale)
+                        pG.destroy()
+
+                        // Coin Texture (Spinning Triangle)
+                        const cG = this.make.graphics()
+                        cG.fillStyle(0x000000)
+                        cG.lineStyle(2 * scale, 0xffffff) // White outline
+                        const coinSize = GameSettings.gameplay.obstacleSize
+                        const trianglePoints = [
+                            { x: (coinSize / 2) * scale, y: 0 },
+                            { x: 0, y: coinSize * scale },
+                            { x: coinSize * scale, y: coinSize * scale }
+                        ]
+                        cG.fillTriangleShape(new Phaser.Geom.Triangle(trianglePoints[0].x, trianglePoints[0].y, trianglePoints[1].x, trianglePoints[1].y, trianglePoints[2].x, trianglePoints[2].y))
+                        cG.strokeTriangleShape(new Phaser.Geom.Triangle(trianglePoints[0].x, trianglePoints[0].y, trianglePoints[1].x, trianglePoints[1].y, trianglePoints[2].x, trianglePoints[2].y))
+
+                        cG.generateTexture('coin', coinSize * scale, coinSize * scale)
+                        cG.destroy()
+
+                        // Particle Texture (Tiny Black bits)
+                        const ptkG = this.make.graphics()
+                        ptkG.fillStyle(0x000000)
+                        ptkG.fillRect(0, 0, 8, 8)
+                        ptkG.generateTexture('particle', 8, 8)
+                        ptkG.destroy()
+
+                        // Block Texture
+                        const blockSize = GameSettings.gameplay.obstacleSize
+                        const wG = this.make.graphics()
+                        wG.fillStyle(cPrimary)
+                        wG.fillRoundedRect(0, 0, blockSize * scale, blockSize * scale, 12 * scale)
+                        wG.generateTexture('block', blockSize * scale, blockSize * scale)
+                        wG.destroy()
+
+                        // Single Spike Texture
+                        const sG = this.make.graphics()
+                        const cHazard = Phaser.Display.Color.HexStringToColor(GameSettings.colors.hazard).color
+                        sG.fillStyle(cHazard)
+                        const spikeW = (GameSettings.canvas.width / 13)
+                        sG.fillTriangle(
+                            spikeW * 0.1 * scale, 64 * scale,
+                            (spikeW / 2) * scale, 0,
+                            spikeW * 0.9 * scale, 64 * scale
+                        )
+                        sG.generateTexture('spike_single', spikeW * scale, 64 * scale)
+                        sG.destroy()
+
+                        // BG Texture 1: Far Layer - mostly transparent with small bridges, towers, and curved arches
+                        const texW = 512 * scale
+                        const texH = 1024 * scale
+                        const texCenter = texW / 2
+                        const winS = 2 * scale
+
+                        const farCanvas = document.createElement('canvas')
+                        farCanvas.width = texW
+                        farCanvas.height = texH
+                        const farCtx = farCanvas.getContext('2d')
+
+                        // Start with everything transparent (white)
+                        farCtx.fillStyle = '#ffffff'
+                        farCtx.fillRect(0, 0, texW, texH)
+
+                        // Draw opaque parts in light gray
+                        farCtx.fillStyle = '#d0d0d0'
+                        const farCenterBandW = 100 * scale
+                        const farTowerW = 60 * scale
+                        const farTowerDist = 160 * scale
+
+                        // Center band
+                        farCtx.fillRect(texCenter - (farCenterBandW / 2), 0, farCenterBandW, texH)
+
+                        // Side towers
+                        farCtx.fillRect(texCenter - farTowerDist - farTowerW, 0, farTowerW, texH)
+                        farCtx.fillRect(texCenter + farTowerDist, 0, farTowerW, texH)
+
+                        // Curved arch bridges
+                        const archH = 140 * scale
+                        const archGap = 200 * scale
+                        const archBridgeHeight = 120 * scale
+                        const archCurveRadius = 160 * scale
+
+                        for (let y = 100 * scale; y < texH; y += (archH + archGap)) {
+                            const bridgeBottom = y + archBridgeHeight
+
+                            // Left arch
+                            const leftStart = texCenter - farTowerDist
+                            const leftEnd = texCenter - (farCenterBandW / 2)
+                            const leftWidth = leftEnd - leftStart
+
+                            farCtx.beginPath()
+                            farCtx.moveTo(leftStart, y)
+                            farCtx.lineTo(leftEnd, y)
+                            farCtx.lineTo(leftEnd, bridgeBottom)
+                            farCtx.quadraticCurveTo(leftStart + leftWidth / 2, bridgeBottom - archCurveRadius, leftStart, bridgeBottom)
+                            farCtx.closePath()
+                            farCtx.fill()
+
+                            // Right arch
+                            const rightStart = texCenter + (farCenterBandW / 2)
+                            const rightEnd = texCenter + farTowerDist
+                            const rightWidth = rightEnd - rightStart
+
+                            farCtx.beginPath()
+                            farCtx.moveTo(rightStart, y)
+                            farCtx.lineTo(rightEnd, y)
+                            farCtx.lineTo(rightEnd, bridgeBottom)
+                            farCtx.quadraticCurveTo(rightStart + rightWidth / 2, bridgeBottom - archCurveRadius, rightStart, bridgeBottom)
+                            farCtx.closePath()
+                            farCtx.fill()
+                        }
+
+                        // Convert white to transparent
+                        const farImageData = farCtx.getImageData(0, 0, texW, texH)
+                        const farData = farImageData.data
+                        for (let i = 0; i < farData.length; i += 4) {
+                            if (farData[i] === 255 && farData[i + 1] === 255 && farData[i + 2] === 255) {
+                                farData[i + 3] = 0
+                            }
+                        }
+                        farCtx.putImageData(farImageData, 0, 0)
+
+                        this.textures.addCanvas('bg_far', farCanvas)
+
+                        // BG Texture 2: Mid Layer - mostly transparent with small bridges and towers
+                        const midCanvas = document.createElement('canvas')
+                        midCanvas.width = texW
+                        midCanvas.height = texH
+                        const midCtx = midCanvas.getContext('2d')
+
+                        // Start with EVERYTHING transparent (white)
+                        midCtx.fillStyle = '#ffffff'
+                        midCtx.fillRect(0, 0, texW, texH)
+
+                        // Draw ONLY the opaque parts (bridges and towers) in gray
+                        midCtx.fillStyle = '#b0b0b0'
+                        const midCenterBandW = 140 * scale
+                        const midTowerWLeft = 60 * scale
+                        const midTowerWRight = 60 * scale
+                        const midTowerDist = 210 * scale
+
+                        // Center band (always visible)
+                        midCtx.fillRect(texCenter - (midCenterBandW / 2), 0, midCenterBandW, texH)
+
+                        // Side towers (always visible)
+                        // Left tower extended by 40 to compensate for +40 position shift
+                        midCtx.fillRect(texCenter - midTowerDist - midTowerWLeft - 40, 0, midTowerWLeft + 40, texH)
+                        midCtx.fillRect(texCenter + midTowerDist, 0, midTowerWRight, texH)
+
+                        // Small bridges at arch intervals with curved inward bottoms (arch shape)
+                        const midArchH = 250 * scale
+                        const midArchGap = 350 * scale
+                        const bridgeHeight = 120 * scale
+                        const curveRadius = 160 * scale
+
+                        for (let y = 0; y < texH; y += (midArchH + midArchGap)) {
+                            const bridgeBottom = y + bridgeHeight
+
+                            // Left bridge with arch curve (curves inward/upward at bottom)
+                            const leftStart = texCenter - midTowerDist
+                            const leftEnd = texCenter - (midCenterBandW / 2)
+                            const leftWidth = leftEnd - leftStart
+
+                            midCtx.beginPath()
+                            midCtx.moveTo(leftStart, y)
+                            midCtx.lineTo(leftEnd, y)
+                            midCtx.lineTo(leftEnd, bridgeBottom)
+                            // Curve inward (upward) at the bottom
+                            midCtx.quadraticCurveTo(leftStart + leftWidth / 2, bridgeBottom - curveRadius, leftStart, bridgeBottom)
+                            midCtx.closePath()
+                            midCtx.fill()
+
+                            // Right bridge with arch curve (curves inward/upward at bottom)
+                            const rightStart = texCenter + (midCenterBandW / 2)
+                            const rightEnd = texCenter + midTowerDist
+                            const rightWidth = rightEnd - rightStart
+
+                            midCtx.beginPath()
+                            midCtx.moveTo(rightStart, y)
+                            midCtx.lineTo(rightEnd, y)
+                            midCtx.lineTo(rightEnd, bridgeBottom)
+                            // Curve inward (upward) at the bottom
+                            midCtx.quadraticCurveTo(rightStart + rightWidth / 2, bridgeBottom - curveRadius, rightStart, bridgeBottom)
+                            midCtx.closePath()
+                            midCtx.fill()
+                        }
+
+                        // Convert white to transparent
+                        const midImageData = midCtx.getImageData(0, 0, texW, texH)
+                        const midData = midImageData.data
+                        for (let i = 0; i < midData.length; i += 4) {
+                            if (midData[i] === 255 && midData[i + 1] === 255 && midData[i + 2] === 255) {
+                                midData[i + 3] = 0
+                            }
+                        }
+                        midCtx.putImageData(midImageData, 0, 0)
+
+                        this.textures.addCanvas('bg_mid', midCanvas)
+
+                        // BG Texture 3: Near Layer (Removed for architectural consistency per instructions)
+                        const bgNearG = this.make.graphics()
+                        bgNearG.generateTexture('bg_near', 1, 1) // Empty placeholder
+                        bgNearG.destroy()
+                    }
+
+                    flap() {
+                        if (this.isGameOver) return
+
+                        const now = this.time.now
+                        if (now - this.lastFlapTime < this.flapCooldown) {
+                            // Visual feedback for ignored input: brief eye squint
+                            if (this.eyeLeft && this.eyeRight) {
+                                this.eyeLeft.scaleY = 0.5
+                                this.eyeRight.scaleY = 0.5
+                                this.time.delayedCall(100, () => {
+                                    this.eyeLeft.scaleY = 1.0
+                                    this.eyeRight.scaleY = 1.0
+                                })
+                            }
+                            return
+                        }
+                        this.lastFlapTime = now
+
+                        if (!this.hasStarted) {
+                            this.hasStarted = true
+                            this.tutorialText.destroy()
+
+                            // Remove start platform after a brief delay so player doesn't land back on it
+                            this.time.delayedCall(1000, () => {
+                                if (this.startPlatform) this.startPlatform.destroy()
+                            })
+                        }
+
+                        // Upward force
+                        this.player.setVelocityY(-GameSettings.gameplay.jumpForce)
+
+                        // Horizontal force
+                        const xVel = GameSettings.gameplay.horizontalSpeed * this.nextFlapDirection
+                        this.player.setVelocityX(xVel)
+
+                        // Flip sprite visually towards direction
+                        if (this.nextFlapDirection === 1) {
+                            this.player.setFlipX(false)
+                            this.nextFlapDirection = -1
+                        } else {
+                            this.player.setFlipX(true)
+                            this.nextFlapDirection = 1
+                        }
+
+                        // Enhanced Blobby Jump: Organic squish/stretch
+                        const jumpDuration = 120
+                        const stretchY = 1.6
+                        const squishX = 0.6
+                        const slant = (Math.random() - 0.5) * 30
+
+                        this.tweens.killTweensOf(this.player)
+
+                        // Using chain for modern, robust tween sequence
+                        this.tweens.chain({
+                            targets: this.player,
+                            tweens: [
+                                {
+                                    scaleX: squishX,
+                                    scaleY: stretchY,
+                                    angle: slant,
+                                    duration: jumpDuration,
+                                    ease: 'Sine.easeOut'
+                                },
+                                {
+                                    scaleX: 1.3,
+                                    scaleY: 0.8,
+                                    angle: -slant * 0.5,
+                                    duration: jumpDuration * 1.5,
+                                    ease: 'Quad.easeInOut'
+                                },
+                                {
+                                    scaleX: 1.2,
+                                    scaleY: 1.2,
+                                    angle: 0,
+                                    duration: 400,
+                                    ease: 'Elastic.easeOut',
+                                    easeParams: [1, 0.5]
+                                }
+                            ]
+                        })
+                    }
+
+                    blobCollide() {
+                        if (this.isGameOver) return
+
+                        // More organic, elastic collision squish
+                        const dir = this.player.body.velocity.x > 0 ? 1 : -1
+                        const impactIntensity = Phaser.Math.Clamp(Math.abs(this.player.body.velocity.x) / 300, 0.4, 1.2)
+
+                        this.tweens.killTweensOf(this.player)
+                        this.tweens.chain({
+                            targets: this.player,
+                            tweens: [
+                                {
+                                    scaleX: 1.2 + (0.5 * impactIntensity),
+                                    scaleY: 1.2 - (0.4 * impactIntensity),
+                                    angle: (20 * impactIntensity) * dir,
+                                    duration: 80,
+                                    ease: 'Quad.easeOut'
+                                },
+                                {
+                                    scaleX: 1.2,
+                                    scaleY: 1.2,
+                                    angle: 0,
+                                    duration: 500,
+                                    ease: 'Elastic.easeOut',
+                                    easeParams: [1, 0.4]
+                                }
+                            ]
+                        })
+                    }
+
+                    collectCoin(player, coin) {
+                        const cx = coin.x
+                        const cy = coin.y
+                        coin.destroy()
+                        this.score += 1
+                        this.scoreText.setText(this.score.toString())
+
+                        // Feedback: Dual expanding fading shockwaves (White and Black)
+                        const shockWhite = this.add.circle(cx, cy, 10, 0xffffff, 0)
+                        shockWhite.setStrokeStyle(3, 0xffffff)
+                        const shockBlack = this.add.circle(cx, cy, 10, 0x000000, 0)
+                        shockBlack.setStrokeStyle(3, 0x000000)
+
+                        // White Shockwave
+                        this.tweens.add({
+                            targets: shockWhite,
+                            radius: 120,
+                            alpha: { from: 1, to: 0 },
+                            duration: 450,
+                            ease: 'Quad.easeOut',
+                            onComplete: () => shockWhite.destroy()
+                        })
+
+                        // Black Shockwave (slightly delayed and different size for visibility)
+                        this.tweens.add({
+                            targets: shockBlack,
+                            radius: 140,
+                            alpha: { from: 1, to: 0 },
+                            delay: 50,
+                            duration: 500,
+                            ease: 'Quad.easeOut',
+                            onComplete: () => shockBlack.destroy()
+                        })
+
+                        // Visual feedback
+                        this.tweens.add({
+                            targets: this.scoreText,
+                            scale: 1.2,
+                            duration: 100,
+                            yoyo: true
+                        })
+                    }
+
+                    spawnParticles(x, y) {
+                        // Instant spawn with significant upward and outward force
+                        for (let i = 0; i < 10; i++) {
+                            const p = this.add.image(x, y, 'particle')
+
+                            this.physics.add.existing(p)
+
+                            // Burst logic: Upward bias (-200 to -600 range) and wide spread
+                            const vx = (Math.random() - 0.5) * 600
+                            const vy = -Math.random() * 400 - 200
+
+                            p.body.setVelocity(vx, vy)
+                            p.body.setGravityY(1400) // Snap them back down quickly
+
+                            this.tweens.add({
+                                targets: p,
+                                alpha: 0,
+                                scale: 0.1,
+                                angle: Math.random() * 360,
+                                duration: 600,
+                                ease: 'Cubic.easeIn',
+                                onComplete: () => p.destroy()
+                            })
+                        }
+                    }
+
+                    generateChunk(targetY) {
+                        const width = GameSettings.canvas.width
+                        const wallThick = GameSettings.gameplay.wallThickness
+                        const screenHeight = GameSettings.canvas.height
+
+                        // Process walls and obstacles screen by screen for density logic
+                        while (this.lastChunkY > targetY) {
+                            const chunkBottom = this.lastChunkY
+                            const chunkTop = chunkBottom - screenHeight
+
+                            // 1. Generate Walls for this screen-sized chunk
+                            for (let y = chunkBottom; y > chunkTop; y -= wallThick) {
+                                const leftWall = this.walls.create(wallThick / 2, y, 'block')
+                                leftWall.setDisplaySize(wallThick, wallThick)
+                                leftWall.refreshBody()
+
+                                const rightWall = this.walls.create(width - wallThick / 2, y, 'block')
+                                rightWall.setDisplaySize(wallThick, wallThick)
+                                rightWall.refreshBody()
+                            }
+
+                            // 2. Generate Balanced Obstacles for this screen-sized chunk
+                            // Density logic: 2 at start, +1 per 4000m
+                            const altitude = Math.max(0, Math.floor((screenHeight - 200) - chunkTop))
+                            const blocksPerScreen = 2 + Math.floor(altitude / 4000)
+
+                            const minX = wallThick + 60
+                            const maxX = width - wallThick - 60
+                            const minDist = 80 // Reduced significantly for denser, tight formations
+
+                            let spawnedInChunk = 0
+                            let attempts = 0
+                            const maxAttempts = 100 // More attempts for tight packing
+
+                            while (spawnedInChunk < blocksPerScreen && attempts < maxAttempts) {
+                                attempts++
+                                const rx = Phaser.Math.Between(minX, maxX)
+                                const ry = Phaser.Math.Between(chunkTop + 50, chunkBottom - 50)
+
+                                if (this.isSpaceClear(rx, ry, minDist)) {
+                                    const block = this.obstacles.create(rx, ry, 'block')
+                                    block.refreshBody()
+                                    spawnedInChunk++
+
+                                    // Occasional coin near obstacle
+                                    if (Math.random() < GameSettings.gameplay.coinSpawnRate) {
+                                        this.spawnCoinNear(rx, ry)
+                                    }
+                                }
+                            }
+
+                            this.lastChunkY = chunkTop
+                            this.highestGeneratedY = chunkTop
+                        }
+                    }
+
+                    isSpaceClear(x, y, minDist) {
+                        const minDistSq = minDist * minDist
+                        let isClear = true
+
+                        // Only need to check obstacles near the Y coordinate
+                        this.obstacles.children.each(obs => {
+                            if (!obs.active) return
+                            const dx = x - obs.x
+                            const dy = y - obs.y
+                            if ((dx * dx + dy * dy) < minDistSq) {
+                                isClear = false
+                            }
+                        })
+
+                        // Also check against coins to avoid weird overlapping clusters
+                        this.coins.children.each(coin => {
+                            if (!coin.active) return
+                            const dx = x - coin.x
+                            const dy = y - coin.y
+                            if ((dx * dx + dy * dy) < minDistSq * 0.5) {
+                                isClear = false
+                            }
+                        })
+
+                        return isClear
+                    }
+
+                    spawnCoinNear(targetX, targetY) {
+                        const offset = 80
+                        const x = Phaser.Math.Clamp(targetX + (Math.random() > 0.5 ? offset : -offset), 100, GameSettings.canvas.width - 100)
+                        const y = targetY + (Math.random() > 0.5 ? offset : -offset)
+
+                        const coin = this.coins.create(x, y, 'coin')
+                        coin.setDisplaySize(GameSettings.gameplay.obstacleSize, GameSettings.gameplay.obstacleSize)
+                        this.tweens.add({
+                            targets: coin,
+                            angle: 360,
+                            duration: 1200,
+                            repeat: -1
+                        })
+                    }
+
+                    shrinkObject(obj, canShrink = false) {
+                        if (!obj || !canShrink || obj.displayHeight < 10) return
+
+                        // Side walls should not shrink
+                        if (this.walls.contains(obj)) return
+
+                        // Per-object cooldown to prevent "drilling"
+                        const now = this.time.now
+                        if (obj.lastShrinkTime && now - obj.lastShrinkTime < 200) {
+                            return
+                        }
+                        obj.lastShrinkTime = now
+
+                        // Shrink by 12% (0.88 multiplier)
+                        const newScale = obj.scaleX * 0.88
+                        obj.setScale(newScale)
+
+                        // Update physics body size
+                        if (obj.body) {
+                            obj.refreshBody()
+                        }
+                    }
+
+                    handleDeath() {
+                        if (this.isGameOver) return
+                        this.isGameOver = true
+
+                        this.physics.pause()
+
+                        // Safety check: ensure this.player is a valid sprite before calling setTint
+                        if (this.player && typeof this.player.setTint === 'function') {
+                            this.player.setTint(0xff0000)
+                        }
+
+                        if (this.playerEyes) this.playerEyes.setVisible(false)
+
+                        this.endGame()
+                    }
+
+                    update(time, delta) {
+                        if (this.isGameOver) return
+
+                        // Update Parallax TileSprites with specific scroll factors
+                        if (this.bgFar && this.bgMid) {
+                            this.bgFar.tilePositionY = this.cameras.main.scrollY * 0.1
+                            this.bgMid.tilePositionY = this.cameras.main.scrollY * 0.3
+                        }
+
+                        // Position eyes relative to player
+                        if (this.player && this.playerEyes) {
+                            this.playerEyes.x = this.player.x
+                            this.playerEyes.y = this.player.y
+
+                            // Organic Smooth Eye Movement logic
+                            // Look towards horizontal velocity
+                            const lookVelX = Phaser.Math.Clamp(this.player.body.velocity.x / 20, -6, 6)
+                            const lookVelY = Phaser.Math.Clamp(this.player.body.velocity.y / 40, -4, 4)
+
+                            // Random "inquisitive" glancing every now and then
+                            if (time % 2000 < 50) {
+                                this.targetEyePos.x = lookVelX + (Math.random() - 0.5) * 4
+                                this.targetEyePos.y = lookVelY + (Math.random() - 0.5) * 4
+                                this.targetPupilPos.x = (Math.random() - 0.5) * 4
+                                this.targetPupilPos.y = (Math.random() - 0.5) * 4
+                            } else if (time % 2000 < 2000) {
+                                this.targetEyePos.x = lookVelX
+                                this.targetEyePos.y = lookVelY
+                                this.targetPupilPos.x = lookVelX * 0.5
+                                this.targetPupilPos.y = lookVelY * 0.5
+                            }
+
+                            // Lerp positions for organic smoothness
+                            this.currentEyePos.x += (this.targetEyePos.x - this.currentEyePos.x) * 0.1
+                            this.currentEyePos.y += (this.targetEyePos.y - this.currentEyePos.y) * 0.1
+                            this.currentPupilPos.x += (this.targetPupilPos.x - this.currentPupilPos.x) * 0.1
+                            this.currentPupilPos.y += (this.targetPupilPos.y - this.currentPupilPos.y) * 0.1
+
+                            this.eyeLeft.x = -24 + this.currentEyePos.x
+                            this.eyeLeft.y = -4 + this.currentEyePos.y
+                            this.eyeRight.x = 24 + this.currentEyePos.x
+                            this.eyeRight.y = -4 + this.currentEyePos.y
+
+                            this.pupilLeft.x = this.eyeLeft.x + this.currentPupilPos.x
+                            this.pupilLeft.y = this.eyeLeft.y + this.currentPupilPos.y
+                            this.pupilRight.x = this.eyeRight.x + this.currentPupilPos.x
+                            this.pupilRight.y = this.eyeRight.y + this.currentPupilPos.y
+                        }
+
+                        // Hard Limit Left/Right to prevent clipping even at high speed
+                        // This is a safety fallback for setCollideWorldBounds
+                        const wallThick = GameSettings.gameplay.wallThickness
+                        const minX = wallThick + 15
+                        const maxX = GameSettings.canvas.width - wallThick - 15
+                        if (this.player.x < minX) {
+                            this.player.x = minX
+                            if (this.player.body.velocity.x < 0) this.player.body.setVelocityX(0)
+                        } else if (this.player.x > maxX) {
+                            this.player.x = maxX
+                            if (this.player.body.velocity.x > 0) this.player.body.setVelocityX(0)
+                        }
+
+                        if (this.player.body.velocity.y > 800) {
+                            this.player.body.setVelocityY(800)
+                        }
+
+                        if (this.hasStarted) {
+                            // Increment the target position by base speed
+                            this.surgeTargetY -= (GameSettings.gameplay.hazardSpeed * delta / 1000)
+
+                            // Checkpoint / Spike Surge Logic
+                            const altitudeProgress = Math.max(0, Math.floor((1080 - 200) - this.player.y))
+                            const currentMilestone = Math.floor(altitudeProgress / 2000) // Set catch-up every 2000m
+
+                            if (currentMilestone > this.lastCheckpointReached) {
+                                this.lastCheckpointReached = currentMilestone
+
+                                // Surge spike target to exactly 400m behind player
+                                this.surgeTargetY = this.player.y + 400
+                            }
+
+                            // Smoothly interpolate the actual container towards the target
+                            // This ensures high-speed movement without popping or jitter
+                            const surgeLerpSpeed = 0.08
+                            this.spikeContainer.y += (this.surgeTargetY - this.spikeContainer.y) * surgeLerpSpeed
+
+                            // Undulate individual spikes
+                            this.spikes.forEach((s, idx) => {
+                                s.y = Math.sin((time / 200) + idx) * 10
+                            })
+
+                            this.spikeContainer.body.updateFromGameObject()
+
+                            // Proximity Danger Screen Shake
+                            const distToSpikes = this.spikeContainer.y - this.player.y
+                            if (distToSpikes < 600) {
+                                // Increase intensity as distance decreases
+                                const intensity = Phaser.Math.Clamp(1 - (distToSpikes / 600), 0, 1) * 0.003
+                                this.cameras.main.shake(100, intensity, false)
+                            }
+                        }
+
+                        const currentCamTop = this.cameras.main.scrollY
+                        if (currentCamTop < this.highestGeneratedY + GameSettings.canvas.height) {
+                            this.generateChunk(currentCamTop - GameSettings.canvas.height)
+                        }
+
+                        const cleanupLimitY = this.spikeContainer.y + 400
+                        this.walls.children.each((wall) => {
+                            if (wall.active && wall.y > cleanupLimitY) {
+                                wall.destroy()
+                            }
+                        })
+                        this.obstacles.children.each((obs) => {
+                            if (obs.active && obs.y > cleanupLimitY) {
+                                obs.destroy()
+                            }
+                        })
+                        this.coins.children.each((coin) => {
+                            if (coin.active && coin.y > cleanupLimitY) {
+                                coin.destroy()
+                            }
+                        })
+
+                        if (this.player.y > this.spikeContainer.y + 50) {
+                            this.handleDeath()
+                        }
+                    }
+
+                    endGame() {
+                        console.log('Game Over! Score:', this.score)
+                        if (window.FarcadeSDK && window.FarcadeSDK.singlePlayer) {
+                            window.FarcadeSDK.singlePlayer.actions.gameOver({ score: this.score })
+                        }
+                    }
+
+                    onConfigUpdate(path, value, oldValue) {
+                        // Handle Color updates dynamically
+                        if (path.startsWith('colors.')) {
+                            if (path === 'colors.background') {
+                                this.cameras.main.setBackgroundColor(value)
+                            } else {
+                                this.textures.remove('player')
+                                this.textures.remove('block')
+                                this.textures.remove('spike_single')
+                                this.generateTextures()
+
+                                this.player.setTexture('player')
+                                this.walls.children.each(c => c.setTexture('block'))
+                                this.obstacles.children.each(c => c.setTexture('block'))
+                                this.coins.children.each(c => c.setTexture('coin'))
+                                this.spikes.forEach(s => s.setTexture('spike_single'))
+                                this.scoreText.setColor(GameSettings.colors.primary)
+                            }
+                        }
+
+                        // Real-time Physics Tweak
+                        if (path === 'gameplay.gravity') {
+                            this.physics.world.gravity.y = value
+                        }
+
+                        // If we change obstacle frequency, we don't need to do anything immediately,
+                        // the next generate call will picking it up.
+                    }
+                }
+
+                /**
+                 * Initialize and start the game
+                 */
+                function initGame() {
+                    const config = {
+                        type: Phaser.WEBGL,
+                        width: GameSettings.canvas.width,
+                        height: GameSettings.canvas.height,
+                        scale: {
+                            mode: Phaser.Scale.FIT,
+                            autoCenter: Phaser.Scale.CENTER_BOTH,
+                            width: GameSettings.canvas.width,
+                            height: GameSettings.canvas.height,
+                        },
+                        backgroundColor: GameSettings.colors.background,
+                        scene: [GameScene],
+                        physics: {
+                            default: 'arcade',
+                            arcade: {
+                                // debug: true 
+                            }
+                        },
+                        fps: {
+                            target: 60,
+                        },
+                        pixelArt: false,
+                        antialias: false,
+                        roundPixels: true,
+                    }
+
+                    try {
+                        const game = new Phaser.Game(config)
+                        console.log('[GAME] Phaser game initialized successfully')
+
+                        game.events.once('ready', () => {
+                            const scene = game.scene.getScene('GameScene')
+                            if (scene) {
+                                ConfigManager.init(game, scene)
+                            }
+                        })
+
+                        setTimeout(() => {
+                            if (!ConfigManager.gameInstance) {
+                                const scene = game.scene.getScene('GameScene')
+                                if (scene) {
+                                    ConfigManager.init(game, scene)
+                                }
+                            }
+                        }, 100)
+                    } catch (error) {
+                        console.error('[GAME] Failed to create Phaser.Game:', error)
+                    }
+                }
+
+                initGame()
+
+
+
+
+                // === END FILE: main.js ===
+
+                console.log('[Run Game] Game code executed successfully');
+            } catch (error) {
+                console.error('[Run Game] Error executing game code:', error);
+                console.error('[Run Game] Stack trace:', error.stack);
+                throw error;
+            }
+        })().catch(error => {
+            console.error('[Run Game] Unhandled error in game initialization:', error);
+        });
+    </script>
+</body>
+
+</html>
