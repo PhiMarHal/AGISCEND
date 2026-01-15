@@ -27,13 +27,14 @@
             display: flex;
             justify-content: center;
             align-items: center;
+            width: 100%;
+            height: 100%;
         }
 
         canvas {
             outline: none;
             display: block;
-            max-width: 100%;
-            max-height: 100%;
+            margin: 0 auto;
         }
     </style>
 </head>
@@ -123,12 +124,20 @@
                         gravity: 1600,
                         jumpForce: 650,
                         horizontalSpeed: 350,
-                        hazardSpeed: 100,
+                        baseHazardSpeed: 100, // Base spike speed
+                        hazardSpeed: 100, // Current spike speed (will be reset at intervals)
+                        hazardSpeedGrowth: 4.0, // Speed increase per second
+                        maxHazardSpeed: 500, // Cap at max theoretical player speed
                         obstacleSize: 45,
                         wallThickness: 35,
-                        coinSpawnRate: 0.8, // Doubled from 0.4
+                        coinSpawnRate: 0.8,
                         checkpointInterval: 2000,
-                        minDistance: 160 // Minimum distance between obstacles
+                        minDistance: 160
+                    },
+                    intervals: {
+                        baseInterval: 10000, // 10000m base interval
+                        currentIntervalIndex: 1, // x multiplier (1, 3, 6 for 10000, 30000, 60000)
+                        nextIntervalAltitude: 10000, // Next interval trigger point
                     },
                     visuals: {
                         heroBaseScale: 1.2
@@ -140,7 +149,7 @@
                         "gameplay.gravity": { type: "number", label: "Gravity", min: 500, max: 3000 },
                         "gameplay.jumpForce": { type: "number", label: "Flap Power", min: 200, max: 1000 },
                         "gameplay.horizontalSpeed": { type: "number", label: "Move Speed", min: 100, max: 800 },
-                        "gameplay.hazardSpeed": { type: "number", label: "Rising Speed", min: 10, max: 400 },
+                        "gameplay.baseHazardSpeed": { type: "number", label: "Rising Speed", min: 10, max: 400 },
                         "gameplay.minDistance": { type: "number", label: "Min Block Spacing", min: 100, max: 300 }
                     }
                 }
@@ -370,11 +379,21 @@
                         this.lastFlapTime = 0
                         this.flapCooldown = 200
                         this.lastCheckpointReached = 0
+
+                        // Interval system state
+                        this.intervalAltitudes = [10000, 30000, 60000, 100000, 150000, 210000, 280000, 360000] // Pre-calculated intervals
+                        this.lastIntervalAltitude = 0 // For spawn rate reset calculation
+                        this.nextIntervalIndex = 0 // Index into intervalAltitudes
+                        this.generatedIntervalBarriers = new Set() // Track which interval barriers have been generated
                     }
 
                     create() {
                         this.generateTextures()
                         this.resetGameState()
+
+                        // Reset spike speed to base on game start/restart
+                        GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed
+                        this.spikeMaxSpeedReached = false
 
                         // 1. Setup World
                         this.cameras.main.setBackgroundColor(GameSettings.colors.background)
@@ -440,7 +459,7 @@
 
                         // Create the physics sprite as the primary player object
                         this.player = this.physics.add.sprite(GameSettings.canvas.width / 2, startY, 'player')
-                        this.player.setCircle(16, 2, 2)
+                        this.player.setCircle(16, 14, 14)
                         // Scale reset: Starting at 1.2 "normal" scaling - set both axes explicitly
                         this.player.setScale(1.2, 1.2)
                         this.player.setBounce(0.4)
@@ -644,14 +663,9 @@
 
                         // Single Spike Texture
                         const sG = this.make.graphics()
-                        const cHazard = Phaser.Display.Color.HexStringToColor(GameSettings.colors.hazard).color
-                        sG.fillStyle(cHazard)
-                        const spikeW = (GameSettings.canvas.width / 13)
-                        sG.fillTriangle(
-                            spikeW * 0.1 * scale, 64 * scale,
-                            (spikeW / 2) * scale, 0,
-                            spikeW * 0.9 * scale, 64 * scale
-                        )
+                        const spikeW = 60
+                        sG.fillStyle(Phaser.Display.Color.HexStringToColor(GameSettings.colors.hazard).color)
+                        sG.fillTriangle((spikeW / 2) * scale, 0, 0, 64 * scale, spikeW * scale, 64 * scale)
                         sG.generateTexture('spike_single', spikeW * scale, 64 * scale)
                         sG.destroy()
 
@@ -983,15 +997,107 @@
                         }
                     }
 
+                    // Calculate the current player altitude in meters
+                    getPlayerAltitude() {
+                        const startY = GameSettings.canvas.height - 200
+                        return Math.max(0, Math.floor(startY - this.player.y))
+                    }
+
+                    // Spawn a full row of square obstacles at a given Y position
+                    spawnFullRowOfSquares(y) {
+                        const width = GameSettings.canvas.width
+                        const wallThick = GameSettings.gameplay.wallThickness
+                        const blockSize = GameSettings.gameplay.obstacleSize
+
+                        // Calculate how many blocks fit across the playable area
+                        const playableWidth = width - (wallThick * 2)
+                        const blocksCount = Math.floor(playableWidth / blockSize)
+                        const startX = wallThick + (playableWidth - (blocksCount * blockSize)) / 2 + blockSize / 2
+
+                        for (let i = 0; i < blocksCount; i++) {
+                            const x = startX + i * blockSize
+                            const block = this.obstacles.create(x, y, 'block')
+                            block.refreshBody()
+                        }
+
+                        console.log(`[INTERVAL] Spawned full row of ${blocksCount} squares at Y=${y}`)
+                    }
+
+                    // Spawn 4 rows of triangle coins above a given Y position
+                    spawnTriangleRows(baseY) {
+                        const width = GameSettings.canvas.width
+                        const wallThick = GameSettings.gameplay.wallThickness
+                        const coinSize = GameSettings.gameplay.obstacleSize
+                        const rowSpacing = coinSize + 20
+
+                        // Calculate coins per row
+                        const playableWidth = width - (wallThick * 2)
+                        const coinsPerRow = Math.floor(playableWidth / (coinSize + 10))
+                        const startX = wallThick + (playableWidth - (coinsPerRow * (coinSize + 10))) / 2 + coinSize / 2
+
+                        let totalCoins = 0
+                        for (let row = 0; row < 4; row++) {
+                            const rowY = baseY - (row + 1) * rowSpacing
+                            for (let i = 0; i < coinsPerRow; i++) {
+                                const x = startX + i * (coinSize + 10)
+                                const coin = this.coins.create(x, rowY, 'coin')
+                                coin.setDisplaySize(coinSize, coinSize)
+                                this.tweens.add({
+                                    targets: coin,
+                                    angle: 360,
+                                    duration: 1200,
+                                    repeat: -1
+                                })
+                                totalCoins++
+                            }
+                        }
+
+                        console.log(`[INTERVAL] Spawned 4 rows of triangles (${totalCoins} total) above Y=${baseY}`)
+                    }
+
+                    // Handle reaching an interval milestone (spike reset only, barriers are pre-generated)
+                    handleIntervalReached(intervalAltitude) {
+                        console.log(`[INTERVAL] ===== PLAYER REACHED INTERVAL at ${intervalAltitude}m =====`)
+
+                        // Convert altitude to Y coordinate
+                        const startY = GameSettings.canvas.height - 200
+                        const intervalY = startY - intervalAltitude
+
+                        // Update the last interval for spawn rate calculations
+                        this.lastIntervalAltitude = intervalAltitude
+
+                        // Reset spike speed to base
+                        GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed
+                        this.spikeMaxSpeedReached = false
+                        console.log(`[INTERVAL] Spike speed reset to ${GameSettings.gameplay.hazardSpeed}`)
+
+                        // Set spikes to 500m below this point
+                        const spikeY = intervalY + 500
+                        this.surgeTargetY = spikeY
+                        console.log(`[INTERVAL] Spikes set to 500m below (Y=${spikeY})`)
+
+                        // Move to next interval
+                        this.nextIntervalIndex++
+                        console.log(`[INTERVAL] Next interval: ${this.intervalAltitudes[this.nextIntervalIndex] || 'none'}m`)
+
+                        // Visual feedback - screen flash
+                        this.cameras.main.flash(300, 255, 255, 255)
+                    }
+
                     generateChunk(targetY) {
                         const width = GameSettings.canvas.width
                         const wallThick = GameSettings.gameplay.wallThickness
                         const screenHeight = GameSettings.canvas.height
+                        const startY = screenHeight - 200 // Player start position
 
                         // Process walls and obstacles screen by screen for density logic
                         while (this.lastChunkY > targetY) {
                             const chunkBottom = this.lastChunkY
                             const chunkTop = chunkBottom - screenHeight
+
+                            // Calculate altitude range for this chunk
+                            const chunkBottomAltitude = Math.max(0, startY - chunkBottom)
+                            const chunkTopAltitude = Math.max(0, startY - chunkTop)
 
                             // 1. Generate Walls for this screen-sized chunk
                             for (let y = chunkBottom; y > chunkTop; y -= wallThick) {
@@ -1004,10 +1110,37 @@
                                 rightWall.refreshBody()
                             }
 
-                            // 2. Generate Balanced Obstacles for this screen-sized chunk
-                            // Density logic: 2 at start, +1 per 4000m
-                            const altitude = Math.max(0, Math.floor((screenHeight - 200) - chunkTop))
-                            const blocksPerScreen = 2 + Math.floor(altitude / 4000)
+                            // 2. Check if any interval barriers should be generated in this chunk
+                            for (let i = 0; i < this.intervalAltitudes.length; i++) {
+                                const intervalAlt = this.intervalAltitudes[i]
+                                if (intervalAlt >= chunkBottomAltitude && intervalAlt <= chunkTopAltitude) {
+                                    if (!this.generatedIntervalBarriers.has(intervalAlt)) {
+                                        this.generatedIntervalBarriers.add(intervalAlt)
+                                        const intervalY = startY - intervalAlt
+
+                                        // Spawn full row of squares at the interval point
+                                        this.spawnFullRowOfSquares(intervalY)
+
+                                        // Spawn 4 rows of triangles above the squares
+                                        this.spawnTriangleRows(intervalY - GameSettings.gameplay.obstacleSize)
+
+                                        console.log(`[INTERVAL] Pre-generated barrier at ${intervalAlt}m (Y=${intervalY})`)
+                                    }
+                                }
+                            }
+
+                            // 3. Calculate relative altitude for spawn density (resets at each interval)
+                            // Find which interval range we're in
+                            let relativeAltitude = chunkTopAltitude
+                            for (let i = this.intervalAltitudes.length - 1; i >= 0; i--) {
+                                if (chunkTopAltitude > this.intervalAltitudes[i]) {
+                                    relativeAltitude = chunkTopAltitude - this.intervalAltitudes[i]
+                                    break
+                                }
+                            }
+
+                            // Density logic: 2 at start, +1 per 4000m (using relative altitude)
+                            const blocksPerScreen = 2 + Math.floor(relativeAltitude / 4000)
 
                             const minX = wallThick + 60
                             const maxX = width - wallThick - 60
@@ -1094,8 +1227,8 @@
                         }
                         obj.lastShrinkTime = now
 
-                        // Shrink by 12% (0.88 multiplier)
-                        const newScale = obj.scaleX * 0.88
+                        // Shrink by 8% (0.92 multiplier)
+                        const newScale = obj.scaleX * 0.92
                         obj.setScale(newScale)
 
                         // Update physics body size
@@ -1255,18 +1388,28 @@
                         }
 
                         if (this.hasStarted) {
-                            // Increment the target position by base speed
+                            // Gradually increase spike speed over time
+                            const speedGrowth = GameSettings.gameplay.hazardSpeedGrowth * (delta / 1000)
+                            GameSettings.gameplay.hazardSpeed += speedGrowth
+
+                            // Cap spike speed at max theoretical player speed
+                            if (GameSettings.gameplay.hazardSpeed >= GameSettings.gameplay.maxHazardSpeed) {
+                                GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.maxHazardSpeed
+                                if (!this.spikeMaxSpeedReached) {
+                                    this.spikeMaxSpeedReached = true
+                                    console.log(`[SPIKES] MAX SPEED REACHED: ${GameSettings.gameplay.maxHazardSpeed} units/s`)
+                                }
+                            }
+
+                            // Increment the target position by current speed
                             this.surgeTargetY -= (GameSettings.gameplay.hazardSpeed * delta / 1000)
 
-                            // Checkpoint / Spike Surge Logic
-                            const altitudeProgress = Math.max(0, Math.floor((1080 - 200) - this.player.y))
-                            const currentMilestone = Math.floor(altitudeProgress / 2000) // Set catch-up every 2000m
+                            // Check for interval milestones
+                            const currentAltitude = this.getPlayerAltitude()
 
-                            if (currentMilestone > this.lastCheckpointReached) {
-                                this.lastCheckpointReached = currentMilestone
-
-                                // Surge spike target to exactly 400m behind player
-                                this.surgeTargetY = this.player.y + 400
+                            if (this.nextIntervalIndex < this.intervalAltitudes.length &&
+                                currentAltitude >= this.intervalAltitudes[this.nextIntervalIndex]) {
+                                this.handleIntervalReached(this.intervalAltitudes[this.nextIntervalIndex])
                             }
 
                             // Smoothly interpolate the actual container towards the target
@@ -1280,14 +1423,6 @@
                             })
 
                             this.spikeContainer.body.updateFromGameObject()
-
-                            // Proximity Danger Screen Shake
-                            const distToSpikes = this.spikeContainer.y - this.player.y
-                            if (distToSpikes < 600) {
-                                // Increase intensity as distance decreases
-                                const intensity = Phaser.Math.Clamp(1 - (distToSpikes / 600), 0, 1) * 0.003
-                                this.cameras.main.shake(100, intensity, false)
-                            }
                         }
 
                         const currentCamTop = this.cameras.main.scrollY
@@ -1374,7 +1509,7 @@
                         physics: {
                             default: 'arcade',
                             arcade: {
-                                // debug: true 
+                                debug: true
                             }
                         },
                         fps: {
