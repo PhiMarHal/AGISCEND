@@ -1472,17 +1472,9 @@
                             // Increment the target position by current speed
                             this.surgeTargetY -= (GameSettings.gameplay.hazardSpeed * delta / 1000)
 
-                            // Check for interval milestones
-                            const currentAltitude = this.getPlayerAltitude()
-
-                            if (this.nextIntervalIndex < this.intervalAltitudes.length &&
-                                currentAltitude >= this.intervalAltitudes[this.nextIntervalIndex]) {
-                                this.handleIntervalReached(this.intervalAltitudes[this.nextIntervalIndex])
-                            }
-
                             // Smoothly interpolate the actual container towards the target
                             // This ensures high-speed movement without popping or jitter
-                            const surgeLerpSpeed = 0.08
+                            const surgeLerpSpeed = 0.02
                             this.spikeContainer.y += (this.surgeTargetY - this.spikeContainer.y) * surgeLerpSpeed
 
                             // Undulate individual spikes
@@ -1491,6 +1483,17 @@
                             })
 
                             this.spikeContainer.body.updateFromGameObject()
+
+                            // Check for interval milestones
+                            const currentAltitude = this.getPlayerAltitude()
+
+                            if (this.nextIntervalIndex < this.intervalAltitudes.length &&
+                                currentAltitude >= this.intervalAltitudes[this.nextIntervalIndex]) {
+                                this.handleIntervalReached(this.intervalAltitudes[this.nextIntervalIndex])
+                            }
+
+
+
                         }
 
                         const currentCamTop = this.cameras.main.scrollY
