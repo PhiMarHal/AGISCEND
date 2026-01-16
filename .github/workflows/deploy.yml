@@ -1,0 +1,24 @@
+name: Deploy to Cloudflare Pages # Just the name of this script for the Actions tab
+on: [push] # Run this every single time I push to GitHub
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest # Borrow a fresh Linux machine from GitHub to do the work
+    permissions:
+      contents: read     # Give the machine permission to read your code
+      deployments: write # Give it permission to talk to Cloudflare's deployment API
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true # CRITICAL: This tells the machine to download the REAL music files
+                    # from LFS, not just the tiny text pointers.
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}   # Uses the secret you saved
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }} # Uses the ID you saved
+          projectName: agiscend # YOUR ACTUAL PROJECT NAME HERE
+          directory: . # "." means "upload everything in the root folder." 
+                       # If your index.html is in a folder named 'dist', change this to 'dist'.
