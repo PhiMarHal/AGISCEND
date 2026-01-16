@@ -42,10 +42,6 @@
 <body>
     <div id="game-container"></div>
 
-
-
-
-
     <script>
         // Wait for CDN dependencies to load
         (async function () {
@@ -104,10 +100,119 @@
 
                 // === FILE: main.js ===
 
-
-
-
                 // NO Phaser.js import — Phaser is loaded via CDN and available on the window object
+
+                /**
+                 * Music Configuration
+                 */
+                const BASE_URL = 'https://agiscend.loiyaa.com/';
+                const isLocal = window.location.protocol === 'file:';
+                const TRACK_COUNT = 2;
+                const SILENCE_BETWEEN_TRACKS = 4000; // 4 seconds
+
+                // Music state
+                let musicPlaylist = [];
+                let currentTrackIndex = 0;
+                let audioElement = null;
+                let musicStarted = false;
+                let isTransitioning = false;
+
+                // Shuffle array (Fisher-Yates)
+                function shuffleArray(array) {
+                    const arr = [...array];
+                    for (let i = arr.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [arr[i], arr[j]] = [arr[j], arr[i]];
+                    }
+                    return arr;
+                }
+
+                // Generate shuffled playlist
+                function generatePlaylist() {
+                    const tracks = [];
+                    for (let i = 1; i <= TRACK_COUNT; i++) {
+                        const trackNum = i.toString().padStart(2, '0');
+                        const trackPath = isLocal
+                            ? `assets/track_${trackNum}.mp3`
+                            : `${BASE_URL}assets/track_${trackNum}.mp3`;
+                        tracks.push(trackPath);
+                    }
+                    return shuffleArray(tracks);
+                }
+
+                // Play next track
+                function playNextTrack() {
+                    if (!musicStarted || isTransitioning) return;
+                    isTransitioning = true;
+
+                    // If we've played all tracks, reshuffle
+                    if (currentTrackIndex >= musicPlaylist.length) {
+                        musicPlaylist = generatePlaylist();
+                        currentTrackIndex = 0;
+                    }
+
+                    const trackPath = musicPlaylist[currentTrackIndex];
+                    currentTrackIndex++;
+
+                    // Clean up old audio element completely
+                    if (audioElement) {
+                        audioElement.pause();
+                        audioElement.removeAttribute('src');
+                        audioElement.load();
+                        audioElement = null;
+                    }
+
+                    // Create fresh audio element
+                    audioElement = new Audio();
+                    audioElement.volume = 0.5;
+
+                    // Set up event handlers BEFORE setting src
+                    audioElement.onended = () => {
+                        isTransitioning = false;
+                        // Wait for silence period, then play next
+                        setTimeout(playNextTrack, SILENCE_BETWEEN_TRACKS);
+                    };
+
+                    audioElement.onerror = () => {
+                        console.warn('Could not load track:', trackPath);
+                        isTransitioning = false;
+                        // Try next track after a short delay
+                        setTimeout(playNextTrack, 1000);
+                    };
+
+                    audioElement.oncanplaythrough = () => {
+                        isTransitioning = false;
+                        audioElement.play().catch(e => {
+                            console.warn('Playback failed:', e);
+                        });
+                    };
+
+                    // Now set the source
+                    audioElement.src = trackPath;
+                    audioElement.load();
+                }
+
+                // Start music (call after user interaction)
+                function startMusic() {
+                    if (musicStarted) return;
+                    musicStarted = true;
+                    isTransitioning = false;
+                    musicPlaylist = generatePlaylist();
+                    currentTrackIndex = 0;
+                    playNextTrack();
+                }
+
+                // Pause/resume music on tab visibility change
+                document.addEventListener('visibilitychange', () => {
+                    if (!audioElement) return;
+                    if (document.hidden) {
+                        audioElement.pause();
+                    } else {
+                        if (musicStarted) {
+                            audioElement.play().catch(() => { });
+                        }
+                    }
+                });
 
                 /**
                  * Game Settings
@@ -640,7 +745,12 @@
                         // Handle mute/unmute requests from Remix
                         window.FarcadeSDK.on('toggle_mute', (data) => {
                             console.log('Remix SDK: Mute toggle requested, isMuted:', data.isMuted)
+                            // Mute Phaser sound system
                             if (this.sound) this.sound.mute = data.isMuted
+                            // Mute the HTML5 audio element for music
+                            if (audioElement) {
+                                audioElement.muted = data.isMuted
+                            }
                         })
 
                         console.log('Remix SDK: Event handlers registered.')
@@ -873,6 +983,9 @@
                         if (!this.hasStarted) {
                             this.hasStarted = true
                             this.tutorialText.destroy()
+
+                            // Start music on first interaction
+                            startMusic()
 
                             // Remove start platform after a brief delay so player doesn't land back on it
                             this.time.delayedCall(1000, () => {
@@ -1638,7 +1751,6 @@
                 }
 
                 initGame()
-                // === END FILE: main.js ===
                 // === END FILE: main.js ===
 
                 console.log('[Run Game] Game code executed successfully');
