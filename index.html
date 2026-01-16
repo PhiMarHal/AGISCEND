@@ -45,6 +45,7 @@
 
 
 
+
     <script>
         // Wait for CDN dependencies to load
         (async function () {
@@ -127,10 +128,10 @@
                         gravity: 1600,
                         jumpForce: 650,
                         horizontalSpeed: 350,
-                        baseHazardSpeed: 50, // Base spike speed
-                        hazardSpeed: 50, // Current spike speed (will be reset at intervals)
+                        baseHazardSpeed: 100, // Base spike speed
+                        hazardSpeed: 100, // Current spike speed (will be reset at intervals)
                         hazardSpeedGrowth: 2.0, // Speed increase per second
-                        maxHazardSpeed: 200, // Cap below half max theoretical player speed
+                        maxHazardSpeed: 100, // Cap below half max theoretical player speed
                         obstacleSize: 45,
                         wallThickness: 35,
                         coinSpawnRate: 0.8,
@@ -139,8 +140,6 @@
                     },
                     intervals: {
                         baseInterval: 10000, // 10000m base interval
-                        currentIntervalIndex: 1, // x multiplier (1, 3, 6 for 10000, 30000, 60000)
-                        nextIntervalAltitude: 10000, // Next interval trigger point
                     },
                     visuals: {
                         heroBaseScale: 1.2
@@ -383,11 +382,10 @@
                         this.flapCooldown = 200
                         this.lastCheckpointReached = 0
 
-                        // Interval system state
+                        // Interval system state (Consistent 10k steps)
                         this.intervalAltitudes = []
-                        for (let n = 1; n <= 20; n++) {
-                            const triangleNumber = (n * (n + 1)) / 2
-                            this.intervalAltitudes.push(triangleNumber * 10000)
+                        for (let n = 1; n <= 100; n++) {
+                            this.intervalAltitudes.push(n * 10000)
                         }
 
                         this.lastIntervalAltitude = 0 // For spawn rate reset calculation
@@ -1189,41 +1187,60 @@
                                 }
                             }
 
-                            // 3. Calculate relative altitude for spawn density (resets at each interval)
-                            // Find which interval range we're in
-                            let relativeAltitude = chunkTopAltitude
-                            for (let i = this.intervalAltitudes.length - 1; i >= 0; i--) {
+                            // 3. Calculate interval-based spawn rates
+                            // Every interval reached doubles the previous multiplier (+100%)
+                            let spawnMultiplier = 1
+                            for (let i = 0; i < this.intervalAltitudes.length; i++) {
                                 if (chunkTopAltitude > this.intervalAltitudes[i]) {
-                                    relativeAltitude = chunkTopAltitude - this.intervalAltitudes[i]
+                                    spawnMultiplier *= 2
+                                } else {
                                     break
                                 }
                             }
 
-                            // Density logic: 2 at start, +1 per 4000m (using relative altitude)
-                            const blocksPerScreen = 2 + Math.floor(relativeAltitude / 4000)
+                            // Base rates for this chunk (static within an interval)
+                            // Starts at 2 blocks per screen, and doubles every 10k meters
+                            const blocksPerScreen = 2 * spawnMultiplier
+                            const coinsPerScreen = blocksPerScreen * 4
 
                             const minX = wallThick + 60
                             const maxX = width - wallThick - 60
-                            const minDist = 80 // Reduced significantly for denser, tight formations
+                            const minDist = 80
 
-                            let spawnedInChunk = 0
-                            let attempts = 0
-                            const maxAttempts = 100 // More attempts for tight packing
-
-                            while (spawnedInChunk < blocksPerScreen && attempts < maxAttempts) {
-                                attempts++
+                            // Spawn Blocks
+                            let blocksSpawned = 0
+                            let blockAttempts = 0
+                            while (blocksSpawned < blocksPerScreen && blockAttempts < 100) {
+                                blockAttempts++
                                 const rx = Phaser.Math.Between(minX, maxX)
-                                const ry = Phaser.Math.Between(chunkTop + 50, chunkBottom - 50)
+                                const ry = Phaser.Math.Between(chunkTop, chunkBottom)
 
                                 if (this.isSpaceClear(rx, ry, minDist)) {
                                     const block = this.obstacles.create(rx, ry, 'block')
                                     block.refreshBody()
-                                    spawnedInChunk++
+                                    blocksSpawned++
+                                }
+                            }
 
-                                    // Occasional coin near obstacle
-                                    if (Math.random() < GameSettings.gameplay.coinSpawnRate) {
-                                        this.spawnCoinNear(rx, ry)
-                                    }
+                            // Independent Coin Spawning (4x frequency of blocks)
+                            let coinsSpawned = 0
+                            let coinAttempts = 0
+                            while (coinsSpawned < coinsPerScreen && coinAttempts < 100) {
+                                coinAttempts++
+                                const rx = Phaser.Math.Between(minX, maxX)
+                                const ry = Phaser.Math.Between(chunkTop, chunkBottom)
+
+                                // Coins can be closer to objects than other objects
+                                if (this.isSpaceClear(rx, ry, 40)) {
+                                    const coin = this.coins.create(rx, ry, 'coin')
+                                    coin.setDisplaySize(GameSettings.gameplay.obstacleSize, GameSettings.gameplay.obstacleSize)
+                                    this.tweens.add({
+                                        targets: coin,
+                                        angle: 360,
+                                        duration: 1200,
+                                        repeat: -1
+                                    })
+                                    coinsSpawned++
                                 }
                             }
 
