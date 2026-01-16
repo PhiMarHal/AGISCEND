@@ -22,3 +22,4 @@ jobs:
           projectName: agiscend # YOUR ACTUAL PROJECT NAME HERE
           directory: . # "." means "upload everything in the root folder." 
                        # If your index.html is in a folder named 'dist', change this to 'dist'.
+          branch: main # Add this line to ensure it targets the production branch
