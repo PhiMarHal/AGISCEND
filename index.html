@@ -107,7 +107,7 @@
                  */
                 const BASE_URL = 'https://agiscend.loiyaa.com/';
                 const isLocal = window.location.protocol === 'file:';
-                const TRACK_COUNT = 2;
+                const TRACK_COUNT = 4;
                 const SILENCE_BETWEEN_TRACKS = 4000; // 4 seconds
 
                 // Music state
@@ -116,6 +116,7 @@
                 let audioElement = null;
                 let musicStarted = false;
                 let isTransitioning = false;
+                let isMusicMuted = false; // Track mute state globally
 
                 // Shuffle array (Fisher-Yates)
                 function shuffleArray(array) {
@@ -165,6 +166,7 @@
                     // Create fresh audio element
                     audioElement = new Audio();
                     audioElement.volume = 0.5;
+                    audioElement.muted = isMusicMuted; // Respect mute setting
 
                     // Set up event handlers BEFORE setting src
                     audioElement.onended = () => {
@@ -182,9 +184,12 @@
 
                     audioElement.oncanplaythrough = () => {
                         isTransitioning = false;
-                        audioElement.play().catch(e => {
-                            console.warn('Playback failed:', e);
-                        });
+                        // Only play if not muted
+                        if (!isMusicMuted) {
+                            audioElement.play().catch(e => {
+                                console.warn('Playback failed:', e);
+                            });
+                        }
                     };
 
                     // Now set the source
@@ -235,8 +240,6 @@
                         horizontalSpeed: 350,
                         baseHazardSpeed: 100, // Base spike speed
                         hazardSpeed: 100, // Current spike speed (will be reset at intervals)
-                        hazardSpeedGrowth: 2.0, // Speed increase per second
-                        maxHazardSpeed: 100, // Cap below half max theoretical player speed
                         obstacleSize: 45,
                         wallThickness: 35,
                         coinSpawnRate: 0.8,
@@ -486,6 +489,7 @@
                         this.lastFlapTime = 0
                         this.flapCooldown = 200
                         this.lastCheckpointReached = 0
+                        this.restartTime = Date.now() // Track when game restarted to prevent immediate input
 
                         // Interval system state (Consistent 10k steps)
                         this.intervalAltitudes = []
@@ -504,7 +508,6 @@
 
                         // Reset spike speed to base on game start/restart
                         GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed
-                        this.spikeMaxSpeedReached = false
 
                         // 1. Setup World
                         this.cameras.main.setBackgroundColor(GameSettings.colors.background)
@@ -584,7 +587,7 @@
                         this.player = this.physics.add.sprite(GameSettings.canvas.width / 2, startY, 'player')
                         // Using Rectangular body for improved collision stability with static blocks
                         this.player.setSize(26, 26)
-                        this.player.setOffset(2, 2)
+                        this.player.setOffset(17, 17)
 
                         // Scale reset: Starting at 1.2 "normal" scaling - set both axes explicitly
                         this.player.setScale(1.2, 1.2)
@@ -745,6 +748,8 @@
                         // Handle mute/unmute requests from Remix
                         window.FarcadeSDK.on('toggle_mute', (data) => {
                             console.log('Remix SDK: Mute toggle requested, isMuted:', data.isMuted)
+                            // Update global mute state
+                            isMusicMuted = data.isMuted
                             // Mute Phaser sound system
                             if (this.sound) this.sound.mute = data.isMuted
                             // Mute the HTML5 audio element for music
@@ -1086,7 +1091,7 @@
                         const cx = coin.x
                         const cy = coin.y
                         coin.destroy()
-                        this.score += 1
+                        this.score += 4
                         this.scoreText.setText(this.score.toString())
 
                         // Feedback: Dual expanding fading shockwaves (White and Black)
@@ -1183,25 +1188,46 @@
                         console.log(`[INTERVAL] Spawned full row of ${blocksCount} squares at Y=${y} with ${gap}px gaps`)
                     }
 
-                    // Spawn 4 rows of triangle coins above a given Y position
-                    spawnTriangleRows(baseY) {
+                    // Spawn columns of 4 coins above a given Y position based on interval number
+                    // Interval 1: 1 column, Interval 2: 2 columns, Interval 5: 5 columns, etc. (no reset)
+                    spawnIntervalCoinColumns(baseY, intervalNumber) {
                         const width = GameSettings.canvas.width
                         const wallThick = GameSettings.gameplay.wallThickness
                         const coinSize = GameSettings.gameplay.obstacleSize
-                        const rowSpacing = coinSize + 20
+                        const coinSpacing = coinSize + 20
 
-                        // Calculate coins per row
+                        // Number of columns equals the interval number (no reset)
+                        const numColumns = intervalNumber
+
+                        // Calculate playable width
                         const playableWidth = width - (wallThick * 2)
-                        const coinsPerRow = Math.floor(playableWidth / (coinSize + 10))
-                        const startX = wallThick + (playableWidth - (coinsPerRow * (coinSize + 10))) / 2 + coinSize / 2
+
+                        // Calculate column positions - distribute evenly across playable width
+                        const columnPositions = []
+                        if (numColumns === 1) {
+                            // Single column in the middle
+                            columnPositions.push(width / 2)
+                        } else {
+                            // Distribute columns evenly using full width
+                            const spacing = playableWidth / (numColumns + 1)
+                            for (let c = 0; c < numColumns; c++) {
+                                columnPositions.push(wallThick + spacing * (c + 1))
+                            }
+                        }
 
                         let totalCoins = 0
-                        for (let row = 0; row < 4; row++) {
-                            const rowY = baseY - (row + 1) * rowSpacing
-                            for (let i = 0; i < coinsPerRow; i++) {
-                                const x = startX + i * (coinSize + 10)
-                                const coin = this.coins.create(x, rowY, 'coin')
+
+                        // Spawn 4 coins vertically for each column
+                        for (const colX of columnPositions) {
+                            for (let row = 0; row < 4; row++) {
+                                const coinY = baseY - (row + 1) * coinSpacing
+                                const coin = this.coins.create(colX, coinY, 'coin')
                                 coin.setDisplaySize(coinSize, coinSize)
+                                // Increase hitbox by 100% from the texture size (which is coinSize * 2)
+                                const textureSize = coinSize * 2
+                                const hitboxSize = textureSize * 2
+                                coin.body.setSize(hitboxSize, hitboxSize)
+                                coin.body.setOffset((textureSize - hitboxSize) / 2, (textureSize - hitboxSize) / 2)
                                 this.tweens.add({
                                     targets: coin,
                                     angle: 360,
@@ -1212,10 +1238,10 @@
                             }
                         }
 
-                        console.log(`[INTERVAL] Spawned 4 rows of triangles (${totalCoins} total) above Y=${baseY}`)
+                        console.log(`[INTERVAL] Spawned ${numColumns} column(s) of 4 coins (${totalCoins} total) above Y=${baseY}`)
                     }
 
-                    // Handle reaching an interval milestone (spike reset logic)
+                    // Handle reaching an interval milestone
                     handleIntervalReached(intervalAltitude) {
                         console.log(`[INTERVAL] ===== PLAYER REACHED INTERVAL at ${intervalAltitude}m =====`)
 
@@ -1226,10 +1252,17 @@
                         // Update the last interval
                         this.lastIntervalAltitude = intervalAltitude
 
-                        // Reset spike speed to base
-                        GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed
-                        this.spikeMaxSpeedReached = false
-                        console.log(`[INTERVAL] Spike speed reset to ${GameSettings.gameplay.hazardSpeed}`)
+                        // Move to next interval (do this first to get correct interval number)
+                        this.nextIntervalIndex++
+                        const currentIntervalNumber = this.nextIntervalIndex // 1-indexed interval number
+
+                        // Check if we just completed a 4-interval cycle (intervals 4, 8, 12, etc.)
+                        if (currentIntervalNumber % 4 === 0) {
+                            // Completed a cycle - increase hazard speed by 100
+                            const cycleNumber = Math.floor(currentIntervalNumber / 4)
+                            GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed + (cycleNumber * 100)
+                            console.log(`[INTERVAL] Completed cycle ${cycleNumber}! Hazard speed now: ${GameSettings.gameplay.hazardSpeed}`)
+                        }
 
                         // Teleport spikes to 500m below player IF they are currently further than 500m away.
                         // If they are closer than 500m, keep them where they are (don't give a free pass).
@@ -1247,8 +1280,6 @@
                             console.log(`[INTERVAL] Spikes are already close (${Math.floor(this.spikeContainer.y - this.player.y)}m). Maintaining pressure.`)
                         }
 
-                        // Move to next interval
-                        this.nextIntervalIndex++
                         console.log(`[INTERVAL] Next interval: ${this.intervalAltitudes[this.nextIntervalIndex] || 'none'}m`)
 
                         // Visual feedback - screen flash
@@ -1289,11 +1320,14 @@
                                         this.generatedIntervalBarriers.add(intervalAlt)
                                         const intervalY = startY - intervalAlt
 
+                                        // Interval number is 1-indexed (i + 1)
+                                        const intervalNumber = i + 1
+
                                         // Spawn full row of squares at the interval point
                                         this.spawnFullRowOfSquares(intervalY)
 
-                                        // Spawn 4 rows of triangles above the squares
-                                        this.spawnTriangleRows(intervalY - GameSettings.gameplay.obstacleSize)
+                                        // Spawn coin columns above the squares (1-4 columns based on interval)
+                                        this.spawnIntervalCoinColumns(intervalY - GameSettings.gameplay.obstacleSize, intervalNumber)
 
                                         console.log(`[INTERVAL] Pre-generated barrier at ${intervalAlt}m (Y=${intervalY})`)
                                     }
@@ -1301,23 +1335,37 @@
                             }
 
                             // 3. Calculate interval-based spawn rates
-                            // Every interval reached doubles the previous multiplier (+100%)
-                            let spawnMultiplier = 1
+                            // Determine which interval we're in (1-indexed)
+                            // intervalsPassedForChunk = 0 means we're in interval 1 (0-10000m)
+                            // intervalsPassedForChunk = 1 means we're in interval 2 (10000-20000m), etc.
+                            let intervalsPassedForChunk = 0
                             for (let i = 0; i < this.intervalAltitudes.length; i++) {
                                 if (chunkTopAltitude > this.intervalAltitudes[i]) {
-                                    spawnMultiplier *= 2
+                                    intervalsPassedForChunk++
                                 } else {
                                     break
                                 }
                             }
 
-                            // Base rates for this chunk (static within an interval)
-                            // Starts at 2 blocks per screen, and doubles every 10k meters
-                            const blocksPerScreen = 2 * spawnMultiplier
-                            const coinsPerScreen = blocksPerScreen * 4
+                            // intervalNumber is 1-indexed (interval 1, 2, 3, ...)
+                            const intervalNumber = intervalsPassedForChunk + 1
 
-                            const minX = wallThick + 60
-                            const maxX = width - wallThick - 60
+                            // For BLOCKS: cycle position resets every 4 intervals (1, 2, 3, 4, 1, 2, 3, 4, ...)
+                            const blockCyclePosition = ((intervalNumber - 1) % 4) + 1
+
+                            // Block spawn rate: X + X * cycle_position (where X = 2)
+                            // Interval 1: 4, Interval 2: 6, Interval 3: 8, Interval 4: 10, then resets
+                            const baseBlockRate = 2
+                            const blocksPerScreen = baseBlockRate + (baseBlockRate * blockCyclePosition)
+
+                            // For COINS: 8 * intervalNumber per full 10000m interval (does NOT reset)
+                            // Calculate coins per screen based on how many screens fit in an interval
+                            const screensPerInterval = 10000 / screenHeight
+                            const totalCoinsForInterval = 8 * intervalNumber
+                            const coinsPerScreen = totalCoinsForInterval / screensPerInterval
+
+                            const minX = wallThick + 10
+                            const maxX = width - wallThick - 10
                             const minDist = 80
 
                             // Spawn Blocks
@@ -1335,10 +1383,11 @@
                                 }
                             }
 
-                            // Independent Coin Spawning (4x frequency of blocks)
+                            // Independent Coin Spawning (use Math.round for fractional coins per screen)
+                            const coinsToSpawn = Math.round(coinsPerScreen)
                             let coinsSpawned = 0
                             let coinAttempts = 0
-                            while (coinsSpawned < coinsPerScreen && coinAttempts < 100) {
+                            while (coinsSpawned < coinsToSpawn && coinAttempts < 100) {
                                 coinAttempts++
                                 const rx = Phaser.Math.Between(minX, maxX)
                                 const ry = Phaser.Math.Between(chunkTop, chunkBottom)
@@ -1347,6 +1396,11 @@
                                 if (this.isSpaceClear(rx, ry, 40)) {
                                     const coin = this.coins.create(rx, ry, 'coin')
                                     coin.setDisplaySize(GameSettings.gameplay.obstacleSize, GameSettings.gameplay.obstacleSize)
+                                    // Increase hitbox by 100% from the texture size (which is obstacleSize * 2)
+                                    const textureSize = GameSettings.gameplay.obstacleSize * 2
+                                    const hitboxSize = textureSize * 2
+                                    coin.body.setSize(hitboxSize, hitboxSize)
+                                    coin.body.setOffset((textureSize - hitboxSize) / 2, (textureSize - hitboxSize) / 2)
                                     this.tweens.add({
                                         targets: coin,
                                         angle: 360,
@@ -1396,6 +1450,11 @@
 
                         const coin = this.coins.create(x, y, 'coin')
                         coin.setDisplaySize(GameSettings.gameplay.obstacleSize, GameSettings.gameplay.obstacleSize)
+                        // Increase hitbox by 100% from the texture size (which is obstacleSize * 2)
+                        const textureSize = GameSettings.gameplay.obstacleSize * 2
+                        const hitboxSize = textureSize * 2
+                        coin.body.setSize(hitboxSize, hitboxSize)
+                        coin.body.setOffset((textureSize - hitboxSize) / 2, (textureSize - hitboxSize) / 2)
                         this.tweens.add({
                             targets: coin,
                             angle: 360,
@@ -1534,7 +1593,9 @@
                         if (this.isGameOver) return
 
                         // Continuous input: Check if mouse or finger is down
-                        if (this.input.activePointer.isDown) {
+                        // But ignore input for 300ms after restart to prevent "Play Again" from triggering flap
+                        const timeSinceRestart = Date.now() - this.restartTime
+                        if (this.input.activePointer.isDown && timeSinceRestart > 300) {
                             this.flap()
                         }
 
@@ -1586,20 +1647,7 @@
                         }
 
                         if (this.hasStarted) {
-                            // Gradually increase spike speed over time
-                            const speedGrowth = GameSettings.gameplay.hazardSpeedGrowth * (delta / 1000)
-                            GameSettings.gameplay.hazardSpeed += speedGrowth
-
-                            // Cap spike speed at max theoretical player speed
-                            if (GameSettings.gameplay.hazardSpeed >= GameSettings.gameplay.maxHazardSpeed) {
-                                GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.maxHazardSpeed
-                                if (!this.spikeMaxSpeedReached) {
-                                    this.spikeMaxSpeedReached = true
-                                    console.log(`[SPIKES] MAX SPEED REACHED: ${GameSettings.gameplay.maxHazardSpeed} units/s`)
-                                }
-                            }
-
-                            // Increment the target position by current speed
+                            // Increment the target position by current speed (speed is now constant within cycles)
                             this.surgeTargetY -= (GameSettings.gameplay.hazardSpeed * delta / 1000)
 
                             // Smoothly interpolate the actual container towards the target
@@ -1710,6 +1758,7 @@
                         physics: {
                             default: 'arcade',
                             arcade: {
+                                debug: true,
                                 steps: 8,
                                 tileBias: 64,
                                 overlapBias: 16,
