@@ -237,7 +237,7 @@
                     gameplay: {
                         gravity: 1600,
                         jumpForce: 650,
-                        horizontalSpeed: 350,
+                        horizontalSpeed: 400,
                         baseHazardSpeed: 100, // Base spike speed
                         hazardSpeed: 100, // Current spike speed (will be reset at intervals)
                         obstacleSize: 45,
@@ -591,9 +591,9 @@
 
                         // Scale reset: Starting at 1.2 "normal" scaling - set both axes explicitly
                         this.player.setScale(1.2, 1.2)
-                        this.player.setBounce(0.4)
+                        this.player.setBounce(2.0)
                         this.player.setCollideWorldBounds(true)
-                        this.player.setMaxVelocity(GameSettings.gameplay.horizontalSpeed * 2, 1200)
+                        this.player.setMaxVelocity(GameSettings.gameplay.horizontalSpeed * 2, 2400)
 
                         // Ensure the player is strictly locked between the inner edges using world bounds
                         this.player.body.setCollideWorldBounds(true)
@@ -1167,7 +1167,7 @@
                         const width = GameSettings.canvas.width
                         const wallThick = GameSettings.gameplay.wallThickness
                         const blockSize = GameSettings.gameplay.obstacleSize
-                        const gap = 48
+                        const gap = 64 // Gap sized to fit 6 normal blocks
 
                         // Calculate how many blocks fit across the playable area with gaps
                         const playableWidth = width - (wallThick * 2)
@@ -1485,11 +1485,11 @@
                         // Increment hit count
                         obj.hitCount++
 
-                        // Calculate new scale: loss of 10% of original size per hit
-                        const newScale = obj.originalScale * (1 - (obj.hitCount * 0.1))
+                        // Calculate new scale: loss of 20% of original size per hit (5 hits to destroy)
+                        const newScale = obj.originalScale * (1 - (obj.hitCount * 0.2))
 
-                        if (newScale <= 0.01 || obj.hitCount >= 10) {
-                            // Destroy object after 10 hits or when scale reaches 0
+                        if (newScale <= 0.01 || obj.hitCount >= 5) {
+                            // Destroy object after 5 hits or when scale reaches 0
                             obj.destroy()
                         } else {
                             // Apply shrinking
