@@ -14,7 +14,7 @@
             width: 100%;
             height: 100%;
             overflow: hidden;
-            background: #ffffff;
+            background: #000000;
         }
 
         body {
@@ -1742,16 +1742,37 @@
                  * Initialize and start the game
                  */
                 function initGame() {
+                    // Calculate initial dimensions based on available space
+                    const container = document.getElementById('game-container');
+                    const containerWidth = container.clientWidth || window.innerWidth;
+                    const containerHeight = container.clientHeight || window.innerHeight;
+
+                    // Fixed logical width, dynamic height
+                    const BASE_WIDTH = 720;
+                    const MIN_HEIGHT = 1080; // 2:3 ratio minimum
+
+                    // Calculate scale factor based on width
+                    const scaleFactor = containerWidth / BASE_WIDTH;
+
+                    // Calculate how much height we can show at this scale
+                    const availableLogicalHeight = containerHeight / scaleFactor;
+
+                    // Use the larger of MIN_HEIGHT or available height
+                    const gameHeight = Math.max(MIN_HEIGHT, Math.floor(availableLogicalHeight));
+
+                    // Update GameSettings with calculated height
+                    GameSettings.canvas.height = gameHeight;
+
                     const config = {
                         type: Phaser.WEBGL,
                         parent: 'game-container',
-                        width: GameSettings.canvas.width,
-                        height: GameSettings.canvas.height,
+                        width: BASE_WIDTH,
+                        height: gameHeight,
                         scale: {
                             mode: Phaser.Scale.FIT,
                             autoCenter: Phaser.Scale.CENTER_BOTH,
-                            width: GameSettings.canvas.width,
-                            height: GameSettings.canvas.height,
+                            width: BASE_WIDTH,
+                            height: gameHeight,
                         },
                         backgroundColor: GameSettings.colors.background,
                         scene: [GameScene],
