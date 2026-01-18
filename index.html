@@ -239,7 +239,7 @@
                         jumpForce: 650,
                         horizontalSpeed: 400,
                         baseHazardSpeed: 100, // Base spike speed
-                        hazardSpeed: 100, // Current spike speed (will be reset at intervals)
+                        hazardSpeed: 100, // Current spike speed
                         obstacleSize: 45,
                         wallThickness: 35,
                         coinSpawnRate: 0.8,
@@ -248,6 +248,19 @@
                     },
                     intervals: {
                         baseInterval: 10000, // 10000m base interval
+                    },
+                    // Obstacle types with interval-based spawning
+                    // startInterval: which interval this obstacle begins spawning (1 = from start)
+                    // spawnRate: [min, max] per interval
+                    obstacleTypes: {
+                        pentagon: {
+                            startInterval: 5, // Set to 1 for testing, change to 5 for production
+                            spawnRate: [4, 8], // Bumped slightly for more reliable 2-8 range
+                            size: 240, // ~2.7x block size
+                            moveSpeed: 80, // Downward movement speed
+                            rotationRange: 60, // Degrees to rotate back and forth
+                            rotationSpeed: 0.001 // Rotation oscillation speed
+                        }
                     },
                     visuals: {
                         heroBaseScale: 1.2
@@ -539,6 +552,11 @@
                             allowGravity: false,
                             immovable: true
                         })
+                        // Pentagons: dynamic group (they move), but immovable (player bounces off)
+                        this.pentagons = this.physics.add.group({
+                            allowGravity: false,
+                            immovable: true
+                        })
 
                         // Spikes Container for undulation
                         this.spikeContainer = this.add.container(0, GameSettings.canvas.height + 50)
@@ -685,6 +703,12 @@
                         })
                         this.physics.add.overlap(this.player, this.spikeContainer, this.handleDeath, null, this)
                         this.physics.add.overlap(this.player, this.coins, this.collectCoin, null, this)
+                        // Pentagon collision: bounce but no damage to pentagon
+                        this.physics.add.collider(this.player, this.pentagons, (p, pentagon) => {
+                            this.cameras.main.shake(100, 0.008)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                        })
 
                         // 7. Input
                         // Note: We move manual continuous input checking to update()
@@ -766,98 +790,109 @@
                     }
 
                     generateTextures() {
-                        // High res textures scaled down for sharpness
-                        const scale = 2
-
-                        // Player Texture
-                        const pG = this.make.graphics()
+                        // All textures generated at actual display size (no supersampling)
                         const cPrimary = Phaser.Display.Color.HexStringToColor(GameSettings.colors.primary).color
                         const cSecondary = Phaser.Display.Color.HexStringToColor(GameSettings.colors.secondary).color
 
-                        // Body - 60x60 texture with scale=2 supersampling, displayed at 1.2x
+                        // Player Texture - 60x60 (displayed at 1.2 scale = 72px)
+                        const pG = this.make.graphics()
                         pG.fillStyle(cPrimary)
-                        pG.fillCircle(15 * scale, 15 * scale, 15 * scale)
-
-                        pG.generateTexture('player', 30 * scale, 30 * scale)
+                        pG.fillCircle(30, 30, 30)
+                        pG.generateTexture('player', 60, 60)
                         pG.destroy()
 
-                        // Coin Texture (Spinning Triangle)
+                        // Coin Texture (Triangle) - 45x45
                         const cG = this.make.graphics()
                         cG.fillStyle(0x000000)
-                        cG.lineStyle(2 * scale, 0xffffff) // White outline
-                        const coinSize = GameSettings.gameplay.obstacleSize
+                        cG.lineStyle(2, 0xffffff)
+                        const coinSize = 45
                         const trianglePoints = [
-                            { x: (coinSize / 2) * scale, y: 0 },
-                            { x: 0, y: coinSize * scale },
-                            { x: coinSize * scale, y: coinSize * scale }
+                            { x: coinSize / 2, y: 0 },
+                            { x: 0, y: coinSize },
+                            { x: coinSize, y: coinSize }
                         ]
                         cG.fillTriangleShape(new Phaser.Geom.Triangle(trianglePoints[0].x, trianglePoints[0].y, trianglePoints[1].x, trianglePoints[1].y, trianglePoints[2].x, trianglePoints[2].y))
                         cG.strokeTriangleShape(new Phaser.Geom.Triangle(trianglePoints[0].x, trianglePoints[0].y, trianglePoints[1].x, trianglePoints[1].y, trianglePoints[2].x, trianglePoints[2].y))
-
-                        cG.generateTexture('coin', coinSize * scale, coinSize * scale)
+                        cG.generateTexture('coin', coinSize, coinSize)
                         cG.destroy()
 
-                        // Particle Texture (Tiny Black bits)
+                        // Particle Texture - 8x8
                         const ptkG = this.make.graphics()
                         ptkG.fillStyle(0x000000)
                         ptkG.fillRect(0, 0, 8, 8)
                         ptkG.generateTexture('particle', 8, 8)
                         ptkG.destroy()
 
-                        // Block Texture
-                        const blockSize = GameSettings.gameplay.obstacleSize
+                        // Block Texture - 90x90 (actual display size)
+                        const blockDisplaySize = 90
                         const wG = this.make.graphics()
                         wG.fillStyle(cPrimary)
-                        wG.fillRoundedRect(0, 0, blockSize * scale, blockSize * scale, 12 * scale)
-                        wG.generateTexture('block', blockSize * scale, blockSize * scale)
+                        wG.fillRoundedRect(0, 0, blockDisplaySize, blockDisplaySize, 24)
+                        wG.generateTexture('block', blockDisplaySize, blockDisplaySize)
                         wG.destroy()
 
-                        // Single Spike Texture
+                        // Single Spike Texture - 128x128
                         const sG = this.make.graphics()
-                        const spikeW = 64
                         sG.fillStyle(Phaser.Display.Color.HexStringToColor(GameSettings.colors.hazard).color)
-                        sG.fillTriangle((spikeW / 2) * scale, 0, 0, 64 * scale, spikeW * scale, 64 * scale)
-                        sG.generateTexture('spike_single', spikeW * scale, 64 * scale)
+                        sG.fillTriangle(64, 0, 0, 128, 128, 128)
+                        sG.generateTexture('spike_single', 128, 128)
                         sG.destroy()
 
-                        // BG Texture 1: Far Layer - mostly transparent with small bridges, towers, and curved arches
-                        const texW = 512 * scale
-                        const texH = 1024 * scale
+                        // Pentagon Texture - 180x180 (2x block size)
+                        const pentSize = GameSettings.obstacleTypes.pentagon.size
+                        const pentG = this.make.graphics()
+                        pentG.fillStyle(cPrimary)
+                        const pentRadius = pentSize / 2
+                        const pentCenterX = pentRadius
+                        const pentCenterY = pentRadius
+                        const pentPoints = []
+                        for (let i = 0; i < 5; i++) {
+                            const angle = (i * 2 * Math.PI / 5) - Math.PI / 2
+                            pentPoints.push({
+                                x: pentCenterX + pentRadius * Math.cos(angle),
+                                y: pentCenterY + pentRadius * Math.sin(angle)
+                            })
+                        }
+                        pentG.beginPath()
+                        pentG.moveTo(pentPoints[0].x, pentPoints[0].y)
+                        for (let i = 1; i < 5; i++) {
+                            pentG.lineTo(pentPoints[i].x, pentPoints[i].y)
+                        }
+                        pentG.closePath()
+                        pentG.fillPath()
+                        pentG.generateTexture('pentagon', pentSize, pentSize)
+                        pentG.destroy()
+
+                        // BG Texture 1: Far Layer - 1024x2048
+                        const texW = 1024
+                        const texH = 2048
                         const texCenter = texW / 2
-                        const winS = 2 * scale
 
                         const farCanvas = document.createElement('canvas')
                         farCanvas.width = texW
                         farCanvas.height = texH
                         const farCtx = farCanvas.getContext('2d')
 
-                        // Start with everything transparent (white)
                         farCtx.fillStyle = '#ffffff'
                         farCtx.fillRect(0, 0, texW, texH)
 
-                        // Draw opaque parts in light gray
                         farCtx.fillStyle = '#d0d0d0'
-                        const farCenterBandW = 120 * scale
-                        const farTowerW = 60 * scale
-                        const farTowerDist = 180 * scale
+                        const farCenterBandW = 240
+                        const farTowerW = 120
+                        const farTowerDist = 360
 
-                        // Center band
                         farCtx.fillRect(texCenter - (farCenterBandW / 2), 0, farCenterBandW, texH)
-
-                        // Side towers
                         farCtx.fillRect(texCenter - farTowerDist - farTowerW, 0, farTowerW, texH)
                         farCtx.fillRect(texCenter + farTowerDist, 0, farTowerW, texH)
 
-                        // Curved arch bridges
-                        const archH = 140 * scale
-                        const archGap = 200 * scale
-                        const archBridgeHeight = 120 * scale
-                        const archCurveRadius = 160 * scale
+                        const archH = 280
+                        const archGap = 400
+                        const archBridgeHeight = 240
+                        const archCurveRadius = 320
 
-                        for (let y = 100 * scale; y < texH; y += (archH + archGap)) {
+                        for (let y = 200; y < texH; y += (archH + archGap)) {
                             const bridgeBottom = y + archBridgeHeight
 
-                            // Left arch
                             const leftStart = texCenter - farTowerDist
                             const leftEnd = texCenter - (farCenterBandW / 2)
                             const leftWidth = leftEnd - leftStart
@@ -870,7 +905,6 @@
                             farCtx.closePath()
                             farCtx.fill()
 
-                            // Right arch
                             const rightStart = texCenter + (farCenterBandW / 2)
                             const rightEnd = texCenter + farTowerDist
                             const rightWidth = rightEnd - rightStart
@@ -884,7 +918,6 @@
                             farCtx.fill()
                         }
 
-                        // Convert white to transparent
                         const farImageData = farCtx.getImageData(0, 0, texW, texH)
                         const farData = farImageData.data
                         for (let i = 0; i < farData.length; i += 4) {
@@ -893,43 +926,35 @@
                             }
                         }
                         farCtx.putImageData(farImageData, 0, 0)
-
                         this.textures.addCanvas('bg_far', farCanvas)
 
-                        // BG Texture 2: Mid Layer - mostly transparent with small bridges and towers
+                        // BG Texture 2: Mid Layer - 1024x2048
                         const midCanvas = document.createElement('canvas')
                         midCanvas.width = texW
                         midCanvas.height = texH
                         const midCtx = midCanvas.getContext('2d')
 
-                        // Start with EVERYTHING transparent (white)
                         midCtx.fillStyle = '#ffffff'
                         midCtx.fillRect(0, 0, texW, texH)
 
-                        // Draw ONLY the opaque parts (bridges and towers) in gray
                         midCtx.fillStyle = '#b0b0b0'
-                        const midCenterBandW = 80 * scale
-                        const midTowerWLeft = 60 * scale
-                        const midTowerWRight = 60 * scale
-                        const midTowerDist = 200 * scale
+                        const midCenterBandW = 160
+                        const midTowerWLeft = 120
+                        const midTowerWRight = 120
+                        const midTowerDist = 400
 
-                        // Center band (always visible)
                         midCtx.fillRect(texCenter - (midCenterBandW / 2), 0, midCenterBandW, texH)
-
-                        // Side towers (always visible)
                         midCtx.fillRect(texCenter - midTowerDist - midTowerWLeft, 0, midTowerWLeft, texH)
                         midCtx.fillRect(texCenter + midTowerDist, 0, midTowerWRight, texH)
 
-                        // Small bridges at arch intervals with curved inward bottoms (arch shape)
-                        const midArchH = 250 * scale
-                        const midArchGap = 350 * scale
-                        const bridgeHeight = 120 * scale
-                        const curveRadius = 160 * scale
+                        const midArchH = 500
+                        const midArchGap = 700
+                        const bridgeHeight = 240
+                        const curveRadius = 320
 
                         for (let y = 0; y < texH; y += (midArchH + midArchGap)) {
                             const bridgeBottom = y + bridgeHeight
 
-                            // Left bridge with arch curve (curves inward/upward at bottom)
                             const leftStart = texCenter - midTowerDist
                             const leftEnd = texCenter - (midCenterBandW / 2)
                             const leftWidth = leftEnd - leftStart
@@ -938,12 +963,10 @@
                             midCtx.moveTo(leftStart, y)
                             midCtx.lineTo(leftEnd, y)
                             midCtx.lineTo(leftEnd, bridgeBottom)
-                            // Curve inward (upward) at the bottom
                             midCtx.quadraticCurveTo(leftStart + leftWidth / 2, bridgeBottom - curveRadius, leftStart, bridgeBottom)
                             midCtx.closePath()
                             midCtx.fill()
 
-                            // Right bridge with arch curve (curves inward/upward at bottom)
                             const rightStart = texCenter + (midCenterBandW / 2)
                             const rightEnd = texCenter + midTowerDist
                             const rightWidth = rightEnd - rightStart
@@ -952,13 +975,11 @@
                             midCtx.moveTo(rightStart, y)
                             midCtx.lineTo(rightEnd, y)
                             midCtx.lineTo(rightEnd, bridgeBottom)
-                            // Curve inward (upward) at the bottom
                             midCtx.quadraticCurveTo(rightStart + rightWidth / 2, bridgeBottom - curveRadius, rightStart, bridgeBottom)
                             midCtx.closePath()
                             midCtx.fill()
                         }
 
-                        // Convert white to transparent
                         const midImageData = midCtx.getImageData(0, 0, texW, texH)
                         const midData = midImageData.data
                         for (let i = 0; i < midData.length; i += 4) {
@@ -967,7 +988,6 @@
                             }
                         }
                         midCtx.putImageData(midImageData, 0, 0)
-
                         this.textures.addCanvas('bg_mid', midCanvas)
 
                         // BG Texture 3: Near Layer (Removed for architectural consistency per instructions)
@@ -1167,7 +1187,7 @@
                         const width = GameSettings.canvas.width
                         const wallThick = GameSettings.gameplay.wallThickness
                         const blockSize = GameSettings.gameplay.obstacleSize
-                        const gap = 64 // Gap sized to fit 6 normal blocks
+                        const gap = 52 // Gap sized to fit 6-7 normal blocks
 
                         // Calculate how many blocks fit across the playable area with gaps
                         const playableWidth = width - (wallThick * 2)
@@ -1223,8 +1243,8 @@
                                 const coinY = baseY - (row + 1) * coinSpacing
                                 const coin = this.coins.create(colX, coinY, 'coin')
                                 coin.setDisplaySize(coinSize, coinSize)
-                                // Increase hitbox by 100% from the texture size (which is coinSize * 2)
-                                const textureSize = coinSize * 2
+                                // Hitbox is 2x display size for easier collection
+                                const textureSize = coinSize
                                 const hitboxSize = textureSize * 2
                                 coin.body.setSize(hitboxSize, hitboxSize)
                                 coin.body.setOffset((textureSize - hitboxSize) / 2, (textureSize - hitboxSize) / 2)
@@ -1258,9 +1278,9 @@
 
                         // Check if we just completed a 4-interval cycle (intervals 4, 8, 12, etc.)
                         if (currentIntervalNumber % 4 === 0) {
-                            // Completed a cycle - increase hazard speed by 100
+                            // Completed a cycle - increase hazard speed by 50
                             const cycleNumber = Math.floor(currentIntervalNumber / 4)
-                            GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed + (cycleNumber * 100)
+                            GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed + (cycleNumber * 50)
                             console.log(`[INTERVAL] Completed cycle ${cycleNumber}! Hazard speed now: ${GameSettings.gameplay.hazardSpeed}`)
                         }
 
@@ -1396,8 +1416,8 @@
                                 if (this.isSpaceClear(rx, ry, 40)) {
                                     const coin = this.coins.create(rx, ry, 'coin')
                                     coin.setDisplaySize(GameSettings.gameplay.obstacleSize, GameSettings.gameplay.obstacleSize)
-                                    // Increase hitbox by 100% from the texture size (which is obstacleSize * 2)
-                                    const textureSize = GameSettings.gameplay.obstacleSize * 2
+                                    // Hitbox is 2x display size for easier collection
+                                    const textureSize = GameSettings.gameplay.obstacleSize
                                     const hitboxSize = textureSize * 2
                                     coin.body.setSize(hitboxSize, hitboxSize)
                                     coin.body.setOffset((textureSize - hitboxSize) / 2, (textureSize - hitboxSize) / 2)
@@ -1410,6 +1430,9 @@
                                     coinsSpawned++
                                 }
                             }
+
+                            // Spawn interval-gated obstacles (pentagons, etc.)
+                            this.spawnIntervalGatedObstacles(intervalNumber, chunkTop, chunkBottom, minX, maxX)
 
                             this.lastChunkY = chunkTop
                             this.highestGeneratedY = chunkTop
@@ -1440,7 +1463,90 @@
                             }
                         })
 
+                        // Also check against pentagons (larger clearance)
+                        this.pentagons.children.each(pentagon => {
+                            if (!pentagon.active) return
+                            const dx = x - pentagon.x
+                            const dy = y - pentagon.y
+                            const pentagonMinDistSq = (minDist + GameSettings.obstacleTypes.pentagon.size / 2) ** 2
+                            if ((dx * dx + dy * dy) < pentagonMinDistSq) {
+                                isClear = false
+                            }
+                        })
+
                         return isClear
+                    }
+
+                    // Generic spawner for interval-gated obstacles
+                    spawnIntervalGatedObstacles(currentInterval, chunkTop, chunkBottom, minX, maxX) {
+                        const obstacleTypes = GameSettings.obstacleTypes
+
+                        for (const [typeName, config] of Object.entries(obstacleTypes)) {
+                            // Skip if current interval is before this obstacle's start interval
+                            if (currentInterval < config.startInterval) continue
+
+                            // Calculate spawn count for this chunk
+                            // Distribute spawns across the interval (10 screens per interval roughly)
+                            const screensPerInterval = 10000 / GameSettings.canvas.height
+                            const [minSpawn, maxSpawn] = config.spawnRate
+                            const avgPerInterval = (minSpawn + maxSpawn) / 2
+                            const spawnChance = avgPerInterval / screensPerInterval
+
+                            // Spawn with probability, or guaranteed 1 if chance > 1
+                            const toSpawn = Math.random() < spawnChance ? 1 : 0
+
+                            if (toSpawn > 0) {
+                                this.spawnObstacleByType(typeName, config, chunkTop, chunkBottom, minX, maxX)
+                            }
+                        }
+                    }
+
+                    // Spawn a specific obstacle type
+                    spawnObstacleByType(typeName, config, chunkTop, chunkBottom, minX, maxX) {
+                        const size = config.size || 90
+                        // Adjust spawn bounds for larger obstacles
+                        const adjustedMinX = minX + size / 2
+                        const adjustedMaxX = maxX - size / 2
+
+                        let attempts = 0
+                        while (attempts < 50) {
+                            attempts++
+                            const rx = Phaser.Math.Between(adjustedMinX, adjustedMaxX)
+                            const ry = Phaser.Math.Between(chunkTop, chunkBottom)
+
+                            // Larger clearance for bigger obstacles
+                            if (this.isSpaceClear(rx, ry, size + 40)) {
+                                if (typeName === 'pentagon') {
+                                    this.spawnPentagon(rx, ry, config)
+                                }
+                                // Add more obstacle types here as needed:
+                                // else if (typeName === 'hexagon') { this.spawnHexagon(rx, ry, config) }
+                                break
+                            }
+                        }
+                    }
+
+                    // Spawn a pentagon obstacle
+                    spawnPentagon(x, y, config) {
+                        const pentagon = this.pentagons.create(x, y, 'pentagon')
+                        const size = config.size
+
+                        // Set display size
+                        pentagon.setDisplaySize(size, size)
+
+                        // Configure physics body - circular for pentagon
+                        // setCircle(radius) - no offset needed when texture and body are same size
+                        pentagon.body.setCircle(size / 2)
+
+                        // Set constant downward velocity
+                        pentagon.body.setVelocityY(config.moveSpeed)
+
+                        // Store rotation config on the object
+                        pentagon.rotationRange = config.rotationRange
+                        pentagon.rotationSpeed = config.rotationSpeed
+                        pentagon.spawnTime = this.time.now
+
+                        console.log(`[OBSTACLE] Spawned pentagon at (${x}, ${y})`)
                     }
 
                     spawnCoinNear(targetX, targetY) {
@@ -1450,8 +1556,8 @@
 
                         const coin = this.coins.create(x, y, 'coin')
                         coin.setDisplaySize(GameSettings.gameplay.obstacleSize, GameSettings.gameplay.obstacleSize)
-                        // Increase hitbox by 100% from the texture size (which is obstacleSize * 2)
-                        const textureSize = GameSettings.gameplay.obstacleSize * 2
+                        // Hitbox is 2x display size for easier collection
+                        const textureSize = GameSettings.gameplay.obstacleSize
                         const hitboxSize = textureSize * 2
                         coin.body.setSize(hitboxSize, hitboxSize)
                         coin.body.setOffset((textureSize - hitboxSize) / 2, (textureSize - hitboxSize) / 2)
@@ -1662,6 +1768,15 @@
 
                             this.spikeContainer.body.updateFromGameObject()
 
+                            // Update pentagons: rotation oscillation (movement handled by velocity)
+                            this.pentagons.children.each((pentagon) => {
+                                if (!pentagon.active) return
+
+                                // Oscillate rotation based on time since spawn
+                                const elapsed = time - pentagon.spawnTime
+                                pentagon.angle = Math.sin(elapsed * pentagon.rotationSpeed) * pentagon.rotationRange
+                            })
+
                             // Check for interval milestones
                             const currentAltitude = this.getPlayerAltitude()
 
@@ -1693,6 +1808,11 @@
                         this.coins.children.each((coin) => {
                             if (coin.active && coin.y > cleanupLimitY) {
                                 coin.destroy()
+                            }
+                        })
+                        this.pentagons.children.each((pentagon) => {
+                            if (pentagon.active && pentagon.y > cleanupLimitY) {
+                                pentagon.destroy()
                             }
                         })
 
