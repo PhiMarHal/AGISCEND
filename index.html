@@ -263,9 +263,9 @@
                         },
                         hexagon: {
                             startInterval: 1, // Set to 1 for testing
-                            spawnRate: [2, 4], // Pairs per interval
-                            size: 68, // 50% of previous size
-                            fireDuration: 1000, // 1 second firing
+                            spawnRate: [4, 8], // Pairs per interval
+                            size: 100, //
+                            fireDuration: 2000, // 1 second firing
                             rechargeDuration: 1000, // 1 second recharge
                             spinDuration: 500 // Last 0.5 second of recharge = spinning
                         }
@@ -524,6 +524,9 @@
 
                         // Hexagon pairs tracking
                         this.hexagonPairs = []
+
+                        // Beam hit stun - prevents flapping after beam hit
+                        this.beamHitTime = 0
                     }
 
                     create() {
@@ -730,11 +733,18 @@
                             this.spawnParticles(p.x, p.y)
                             this.blobCollide()
                         })
-                        // Hexagon beam collision: bounce off active beams
+                        // Hexagon beam collision: bounce off active beams (unresistable)
                         this.physics.add.collider(this.player, this.hexagonBeams, (p, beam) => {
                             this.cameras.main.shake(150, 0.01)
                             this.spawnParticles(p.x, p.y)
                             this.blobCollide()
+                            // Mark beam hit time - prevents flapping for a short duration
+                            this.beamHitTime = this.time.now
+
+                            // Amplify the bounce velocity for a stronger knockback
+                            const boostFactor = 2.0
+                            p.body.velocity.x *= boostFactor
+                            p.body.velocity.y *= boostFactor
                         })
 
                         // 7. Input
@@ -1054,6 +1064,13 @@
                         if (this.isGameOver) return
 
                         const now = this.time.now
+
+                        // Prevent flapping if recently hit by beam (let bounce complete)
+                        const beamStunDuration = 400 // ms
+                        if (now - this.beamHitTime < beamStunDuration) {
+                            return
+                        }
+
                         if (now - this.lastFlapTime < this.flapCooldown) {
                             return
                         }
