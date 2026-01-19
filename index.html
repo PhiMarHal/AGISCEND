@@ -260,6 +260,14 @@
                             moveSpeed: 80, // Downward movement speed
                             rotationRange: 60, // Degrees to rotate back and forth
                             rotationSpeed: 0.001 // Rotation oscillation speed
+                        },
+                        hexagon: {
+                            startInterval: 1, // Set to 1 for testing
+                            spawnRate: [2, 4], // Pairs per interval
+                            size: 68, // 50% of previous size
+                            fireDuration: 1000, // 1 second firing
+                            rechargeDuration: 1000, // 1 second recharge
+                            spinDuration: 500 // Last 0.5 second of recharge = spinning
                         }
                     },
                     visuals: {
@@ -513,6 +521,9 @@
                         this.lastIntervalAltitude = 0 // For spawn rate reset calculation
                         this.nextIntervalIndex = 0 // Index into intervalAltitudes
                         this.generatedIntervalBarriers = new Set() // Track which interval barriers have been generated
+
+                        // Hexagon pairs tracking
+                        this.hexagonPairs = []
                     }
 
                     create() {
@@ -557,6 +568,10 @@
                             allowGravity: false,
                             immovable: true
                         })
+                        // Hexagons: static group (wall-mounted)
+                        this.hexagons = this.physics.add.staticGroup()
+                        // Hexagon beams: static group for the laser rays
+                        this.hexagonBeams = this.physics.add.staticGroup()
 
                         // Spikes Container for undulation
                         this.spikeContainer = this.add.container(0, GameSettings.canvas.height + 50)
@@ -706,6 +721,18 @@
                         // Pentagon collision: bounce but no damage to pentagon
                         this.physics.add.collider(this.player, this.pentagons, (p, pentagon) => {
                             this.cameras.main.shake(100, 0.008)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                        })
+                        // Hexagon collision: bounce off the hexagons
+                        this.physics.add.collider(this.player, this.hexagons, (p, hexagon) => {
+                            this.cameras.main.shake(100, 0.006)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                        })
+                        // Hexagon beam collision: bounce off active beams
+                        this.physics.add.collider(this.player, this.hexagonBeams, (p, beam) => {
+                            this.cameras.main.shake(150, 0.01)
                             this.spawnParticles(p.x, p.y)
                             this.blobCollide()
                         })
@@ -862,6 +889,33 @@
                         pentG.fillPath()
                         pentG.generateTexture('pentagon', pentSize, pentSize)
                         pentG.destroy()
+
+                        // Hexagon Texture - black fill with white outline
+                        const hexSize = GameSettings.obstacleTypes.hexagon.size
+                        const hexG = this.make.graphics()
+                        hexG.fillStyle(0x000000)
+                        hexG.lineStyle(3, 0xffffff)
+                        const hexRadius = hexSize / 2
+                        const hexCenterX = hexRadius
+                        const hexCenterY = hexRadius
+                        const hexPoints = []
+                        for (let i = 0; i < 6; i++) {
+                            const angle = (i * 2 * Math.PI / 6) - Math.PI / 2
+                            hexPoints.push({
+                                x: hexCenterX + hexRadius * 0.9 * Math.cos(angle),
+                                y: hexCenterY + hexRadius * 0.9 * Math.sin(angle)
+                            })
+                        }
+                        hexG.beginPath()
+                        hexG.moveTo(hexPoints[0].x, hexPoints[0].y)
+                        for (let i = 1; i < 6; i++) {
+                            hexG.lineTo(hexPoints[i].x, hexPoints[i].y)
+                        }
+                        hexG.closePath()
+                        hexG.fillPath()
+                        hexG.strokePath()
+                        hexG.generateTexture('hexagon', hexSize, hexSize)
+                        hexG.destroy()
 
                         // BG Texture 1: Far Layer - 1024x2048
                         const texW = 1024
@@ -1474,6 +1528,17 @@
                             }
                         })
 
+                        // Also check against hexagons
+                        this.hexagons.children.each(hexagon => {
+                            if (!hexagon.active) return
+                            const dx = x - hexagon.x
+                            const dy = y - hexagon.y
+                            const hexagonMinDistSq = (minDist + GameSettings.obstacleTypes.hexagon.size / 2) ** 2
+                            if ((dx * dx + dy * dy) < hexagonMinDistSq) {
+                                isClear = false
+                            }
+                        })
+
                         return isClear
                     }
 
@@ -1518,9 +1583,9 @@
                             if (this.isSpaceClear(rx, ry, size + 40)) {
                                 if (typeName === 'pentagon') {
                                     this.spawnPentagon(rx, ry, config)
+                                } else if (typeName === 'hexagon') {
+                                    this.spawnHexagonPair(ry, config)
                                 }
-                                // Add more obstacle types here as needed:
-                                // else if (typeName === 'hexagon') { this.spawnHexagon(rx, ry, config) }
                                 break
                             }
                         }
@@ -1547,6 +1612,226 @@
                         pentagon.spawnTime = this.time.now
 
                         console.log(`[OBSTACLE] Spawned pentagon at (${x}, ${y})`)
+                    }
+
+                    // Spawn a hexagon pair on opposite walls
+                    spawnHexagonPair(y, config) {
+                        const wallThick = GameSettings.gameplay.wallThickness
+                        const size = config.size
+                        const halfSize = size / 2
+
+                        // Left hexagon - center positioned on the wall edge (part outside game window)
+                        const leftX = wallThick
+                        const leftHex = this.hexagons.create(leftX, y, 'hexagon')
+                        leftHex.setDisplaySize(size, size)
+                        leftHex.refreshBody()
+
+                        // Right hexagon - center positioned on the wall edge (part outside game window)
+                        const rightX = GameSettings.canvas.width - wallThick
+                        const rightHex = this.hexagons.create(rightX, y, 'hexagon')
+                        rightHex.setDisplaySize(size, size)
+                        rightHex.refreshBody()
+
+                        // Create the pair data structure
+                        const pairData = {
+                            left: leftHex,
+                            right: rightHex,
+                            y: y,
+                            spawnTime: this.time.now,
+                            state: 'recharging', // 'recharging', 'spinning', 'firing'
+                            stateStartTime: this.time.now,
+                            beam: null,
+                            beamGraphics: null,
+                            config: config
+                        }
+
+                        // Store reference to pair on each hexagon
+                        leftHex.pairData = pairData
+                        rightHex.pairData = pairData
+
+                        // Add to tracking array
+                        this.hexagonPairs.push(pairData)
+
+                        console.log(`[OBSTACLE] Spawned hexagon pair at Y=${y}`)
+                    }
+
+                    // Update hexagon pairs (called in main update loop)
+                    updateHexagonPairs(time) {
+                        const config = GameSettings.obstacleTypes.hexagon
+                        const rechargeDuration = config.rechargeDuration
+                        const spinDuration = config.spinDuration
+                        const fireDuration = config.fireDuration
+                        const totalCycle = rechargeDuration + fireDuration
+
+                        for (let i = this.hexagonPairs.length - 1; i >= 0; i--) {
+                            const pair = this.hexagonPairs[i]
+
+                            // Check if hexagons are still active
+                            if (!pair.left.active || !pair.right.active) {
+                                // Clean up beam if exists
+                                if (pair.beam) {
+                                    pair.beam.destroy()
+                                    pair.beam = null
+                                }
+                                if (pair.beamGraphics) {
+                                    pair.beamGraphics.destroy()
+                                    pair.beamGraphics = null
+                                }
+                                this.hexagonPairs.splice(i, 1)
+                                continue
+                            }
+
+                            const cycleTime = (time - pair.spawnTime) % totalCycle
+
+                            // Determine state based on cycle time
+                            // 0 to rechargeDuration-spinDuration: recharging (not spinning)
+                            // rechargeDuration-spinDuration to rechargeDuration: spinning (about to fire)
+                            // rechargeDuration to totalCycle: firing
+
+                            if (cycleTime < rechargeDuration - spinDuration) {
+                                // Recharging state (no spin)
+                                if (pair.state !== 'recharging') {
+                                    pair.state = 'recharging'
+                                    // Destroy beam when switching to recharge
+                                    if (pair.beam) {
+                                        pair.beam.destroy()
+                                        pair.beam = null
+                                    }
+                                    if (pair.beamGraphics) {
+                                        pair.beamGraphics.destroy()
+                                        pair.beamGraphics = null
+                                    }
+                                }
+                                // Reset rotation
+                                pair.left.angle = 0
+                                pair.right.angle = 0
+                            } else if (cycleTime < rechargeDuration) {
+                                // Spinning state (about to fire)
+                                if (pair.state !== 'spinning') {
+                                    pair.state = 'spinning'
+                                }
+                                // Calculate spin progress (0 to 1)
+                                const spinProgress = (cycleTime - (rechargeDuration - spinDuration)) / spinDuration
+                                // Accelerating spin - starts slow, ends fast
+                                const spinAngle = spinProgress * spinProgress * 720 // Two full rotations, accelerating
+                                pair.left.angle = spinAngle
+                                pair.right.angle = -spinAngle // Opposite direction
+                            } else {
+                                // Firing state
+                                if (pair.state !== 'firing') {
+                                    pair.state = 'firing'
+                                    // Create the beam
+                                    this.createHexagonBeam(pair)
+                                }
+                                // Keep spinning slowly while firing
+                                const fireProgress = (cycleTime - rechargeDuration) / fireDuration
+                                pair.left.angle = 720 + fireProgress * 180
+                                pair.right.angle = -720 - fireProgress * 180
+
+                                // Update beam graphics (animated lines)
+                                this.updateBeamGraphics(pair, time)
+                            }
+                        }
+                    }
+
+                    // Create the laser beam between hexagon pair
+                    createHexagonBeam(pair) {
+                        const halfSize = pair.config.size / 2
+                        // Beam starts from the edge of each hexagon
+                        const leftX = pair.left.x + halfSize
+                        const rightX = pair.right.x - halfSize
+                        const beamWidth = rightX - leftX
+                        const beamHeight = 25 // Base height (will pulse 20-30)
+
+                        // Create physics body for collision
+                        const beam = this.add.rectangle(
+                            (leftX + rightX) / 2,
+                            pair.y,
+                            beamWidth,
+                            beamHeight,
+                            0xffffff
+                        )
+                        beam.setStrokeStyle(2, 0x000000)
+
+                        this.physics.add.existing(beam, true) // Static body
+                        this.hexagonBeams.add(beam)
+
+                        pair.beam = beam
+
+                        // Create graphics object for animated lines
+                        pair.beamGraphics = this.add.graphics()
+                        pair.beamGraphics.setDepth(5)
+                    }
+
+                    // Update beam graphics with animated gray lines
+                    updateBeamGraphics(pair, time) {
+                        if (!pair.beam || !pair.beamGraphics) return
+
+                        const graphics = pair.beamGraphics
+                        graphics.clear()
+
+                        const halfSize = pair.config.size / 2
+                        const leftX = pair.left.x + halfSize
+                        const rightX = pair.right.x - halfSize
+                        const centerX = (leftX + rightX) / 2
+                        const centerY = pair.y
+
+                        // Pulse the beam height between 20 and 30 - 4 pulses over fire duration
+                        const fireDuration = pair.config.fireDuration
+                        const cycleTime = (time - pair.spawnTime) % (pair.config.rechargeDuration + fireDuration)
+                        const fireStartTime = pair.config.rechargeDuration
+                        const timeIntoFire = cycleTime - fireStartTime
+
+                        // 4 pulses over fireDuration
+                        const pulseProgress = (timeIntoFire / fireDuration) * 4 * Math.PI * 2
+                        const pulseAmount = Math.sin(pulseProgress) * 5 // Pulse +/- 5 pixels
+                        const beamHeight = 25 + pulseAmount // Oscillates between 20 and 30
+
+                        // Update the beam rectangle size
+                        pair.beam.setSize(rightX - leftX, beamHeight)
+                        pair.beam.body.setSize(rightX - leftX, beamHeight)
+
+                        // New effect: small energy dashes converging toward center
+                        graphics.lineStyle(2, 0x888888, 0.5)
+
+                        const speed = 0.4 // Fast movement
+                        const dashLength = 20
+                        const dashSpacing = 60
+                        const halfBeam = (rightX - leftX) / 2
+
+                        // Create several "lanes" of dashes at different Y offsets
+                        const lanes = [-6, 0, 6]
+
+                        for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
+                            const yOffset = lanes[laneIdx]
+                            const yPos = centerY + yOffset
+
+                            // Stagger timing per lane
+                            const laneTimeOffset = laneIdx * 200
+                            const progress = ((time + laneTimeOffset) * speed) % dashSpacing
+
+                            // Dashes coming from left side
+                            for (let d = 0; d < 6; d++) {
+                                const dashX = leftX + progress + (d * dashSpacing)
+                                if (dashX > leftX && dashX + dashLength < centerX) {
+                                    graphics.beginPath()
+                                    graphics.moveTo(dashX, yPos)
+                                    graphics.lineTo(dashX + dashLength, yPos)
+                                    graphics.strokePath()
+                                }
+                            }
+
+                            // Dashes coming from right side
+                            for (let d = 0; d < 6; d++) {
+                                const dashX = rightX - progress - (d * dashSpacing)
+                                if (dashX < rightX && dashX - dashLength > centerX) {
+                                    graphics.beginPath()
+                                    graphics.moveTo(dashX, yPos)
+                                    graphics.lineTo(dashX - dashLength, yPos)
+                                    graphics.strokePath()
+                                }
+                            }
+                        }
                     }
 
                     spawnCoinNear(targetX, targetY) {
@@ -1785,7 +2070,8 @@
                                 this.handleIntervalReached(this.intervalAltitudes[this.nextIntervalIndex])
                             }
 
-
+                            // Update hexagon pairs (firing, spinning, beams)
+                            this.updateHexagonPairs(time)
 
                         }
 
@@ -1813,6 +2099,18 @@
                         this.pentagons.children.each((pentagon) => {
                             if (pentagon.active && pentagon.y > cleanupLimitY) {
                                 pentagon.destroy()
+                            }
+                        })
+                        // Cleanup hexagons
+                        this.hexagons.children.each((hexagon) => {
+                            if (hexagon.active && hexagon.y > cleanupLimitY) {
+                                hexagon.destroy()
+                            }
+                        })
+                        // Cleanup hexagon beams
+                        this.hexagonBeams.children.each((beam) => {
+                            if (beam.active && beam.y > cleanupLimitY) {
+                                beam.destroy()
                             }
                         })
 
