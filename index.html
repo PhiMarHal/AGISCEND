@@ -107,7 +107,7 @@
                  */
                 const BASE_URL = 'https://agiscend.loiyaa.com/';
                 const isLocal = window.location.protocol === 'file:';
-                const TRACK_COUNT = 9;
+                const TRACK_COUNT = 6;
                 const SILENCE_BETWEEN_TRACKS = 4000; // 4 seconds
 
                 // Music state
@@ -247,7 +247,7 @@
                         minDistance: 160
                     },
                     intervals: {
-                        baseInterval: 10000, // 10000m base interval
+                        baseInterval: 8000, // 8000m base interval
                     },
                     // Obstacle types with interval-based spawning
                     // startInterval: which interval this obstacle begins spawning (1 = from start)
@@ -255,7 +255,7 @@
                     obstacleTypes: {
                         pentagon: {
                             startInterval: 5, // Set to 1 for testing, change to 5 for production
-                            spawnRate: [4, 8], // Bumped slightly for more reliable 2-8 range
+                            spawnRate: [3.2, 6.4], // Scaled for 8000m intervals to maintain density
                             size: 240, // ~2.7x block size
                             moveSpeed: 80, // Downward movement speed
                             rotationRange: 60, // Degrees to rotate back and forth
@@ -263,7 +263,7 @@
                         },
                         hexagon: {
                             startInterval: 9, // Set to 1 for testing
-                            spawnRate: [4, 8], // Pairs per interval
+                            spawnRate: [3.2, 6.4], // Scaled for 8000m intervals to maintain density
                             size: 100, //
                             fireDuration: 2000, // 1 second firing
                             rechargeDuration: 1000, // 1 second recharge
@@ -512,10 +512,10 @@
                         this.lastCheckpointReached = 0
                         this.restartTime = Date.now() // Track when game restarted to prevent immediate input
 
-                        // Interval system state (Consistent 10k steps)
+                        // Interval system state (Consistent steps based on baseInterval)
                         this.intervalAltitudes = []
                         for (let n = 1; n <= 100; n++) {
-                            this.intervalAltitudes.push(n * 10000)
+                            this.intervalAltitudes.push(n * GameSettings.intervals.baseInterval)
                         }
 
                         this.lastIntervalAltitude = 0 // For spawn rate reset calculation
@@ -1554,8 +1554,8 @@
 
                             // 3. Calculate interval-based spawn rates
                             // Determine which interval we're in (1-indexed)
-                            // intervalsPassedForChunk = 0 means we're in interval 1 (0-10000m)
-                            // intervalsPassedForChunk = 1 means we're in interval 2 (10000-20000m), etc.
+                            // intervalsPassedForChunk = 0 means we're in interval 1 (0-8000m)
+                            // intervalsPassedForChunk = 1 means we're in interval 2 (8000-16000m), etc.
                             let intervalsPassedForChunk = 0
                             for (let i = 0; i < this.intervalAltitudes.length; i++) {
                                 if (chunkTopAltitude > this.intervalAltitudes[i]) {
@@ -1576,9 +1576,9 @@
                             const baseBlockRate = 2
                             const blocksPerScreen = baseBlockRate + (baseBlockRate * blockCyclePosition)
 
-                            // For COINS: 8 * intervalNumber per full 10000m interval (does NOT reset)
+                            // For COINS: 8 * intervalNumber per full interval (does NOT reset)
                             // Calculate coins per screen based on how many screens fit in an interval
-                            const screensPerInterval = 10000 / screenHeight
+                            const screensPerInterval = GameSettings.intervals.baseInterval / screenHeight
                             const totalCoinsForInterval = 8 * intervalNumber
                             const coinsPerScreen = totalCoinsForInterval / screensPerInterval
 
@@ -1695,8 +1695,8 @@
                             if (currentInterval < config.startInterval) continue
 
                             // Calculate spawn count for this chunk
-                            // Distribute spawns across the interval (10 screens per interval roughly)
-                            const screensPerInterval = 10000 / GameSettings.canvas.height
+                            // Distribute spawns across the interval
+                            const screensPerInterval = GameSettings.intervals.baseInterval / GameSettings.canvas.height
                             const [minSpawn, maxSpawn] = config.spawnRate
                             const avgPerInterval = (minSpawn + maxSpawn) / 2
                             const spawnChance = avgPerInterval / screensPerInterval
