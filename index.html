@@ -107,7 +107,7 @@
                  */
                 const BASE_URL = 'https://agiscend.loiyaa.com/';
                 const isLocal = window.location.protocol === 'file:';
-                const TRACK_COUNT = 6;
+                const TRACK_COUNT = 11;
                 const SILENCE_BETWEEN_TRACKS = 4000; // 4 seconds
 
                 // Music state
@@ -238,8 +238,9 @@
                         gravity: 1600,
                         jumpForce: 650,
                         horizontalSpeed: 400,
-                        baseHazardSpeed: 100, // Base spike speed
-                        hazardSpeed: 100, // Current spike speed
+                        baseHazardSpeed: 120, // Base spike speed
+                        hazardSpeed: 120, // Current spike speed
+                        hazardIncrease: 40, // Spike speed increase per wall
                         obstacleSize: 45,
                         wallThickness: 35,
                         coinSpawnRate: 0.8,
@@ -247,7 +248,7 @@
                         minDistance: 160
                     },
                     intervals: {
-                        baseInterval: 5000, // 8000m base interval
+                        baseInterval: 5000, // 5000m base interval
                     },
                     // Obstacle types with interval-based spawning
                     // startInterval: which interval this obstacle begins spawning (1 = from start)
@@ -255,7 +256,7 @@
                     obstacleTypes: {
                         pentagon: {
                             startInterval: 5, // Set to 1 for testing, change to 5 for production
-                            spawnRate: [3.2, 6.4], // Scaled for 8000m intervals to maintain density
+                            spawnRate: [2, 4], //
                             size: 240, // ~2.7x block size
                             moveSpeed: 80, // Downward movement speed
                             rotationRange: 60, // Degrees to rotate back and forth
@@ -263,7 +264,7 @@
                         },
                         hexagon: {
                             startInterval: 9, // Set to 1 for testing
-                            spawnRate: [3.2, 6.4], // Scaled for 8000m intervals to maintain density
+                            spawnRate: [2, 4], //
                             size: 100, //
                             fireDuration: 2000, // 1 second firing
                             rechargeDuration: 1000, // 1 second recharge
@@ -1482,9 +1483,9 @@
 
                         // Check if we just completed a 4-interval cycle (intervals 4, 8, 12, etc.)
                         if (currentIntervalNumber % 4 === 0) {
-                            // Completed a cycle - increase hazard speed by 50
+                            // Completed a cycle - increase hazard speed
                             const cycleNumber = Math.floor(currentIntervalNumber / 4)
-                            GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed + (cycleNumber * 50)
+                            GameSettings.gameplay.hazardSpeed = GameSettings.gameplay.baseHazardSpeed + (cycleNumber * GameSettings.gameplay.hazardIncrease)
                             console.log(`[INTERVAL] Completed cycle ${cycleNumber}! Hazard speed now: ${GameSettings.gameplay.hazardSpeed}`)
                         }
 
@@ -1698,8 +1699,9 @@
                             // Distribute spawns across the interval
                             const screensPerInterval = GameSettings.intervals.baseInterval / GameSettings.canvas.height
                             const [minSpawn, maxSpawn] = config.spawnRate
-                            const avgPerInterval = (minSpawn + maxSpawn) / 2
-                            const spawnChance = avgPerInterval / screensPerInterval
+                            // Randomize within the range for variety
+                            const countThisInterval = Phaser.Math.FloatBetween(minSpawn, maxSpawn)
+                            const spawnChance = countThisInterval / screensPerInterval
 
                             // Spawn with probability, or guaranteed 1 if chance > 1
                             const toSpawn = Math.random() < spawnChance ? 1 : 0
@@ -1717,21 +1719,13 @@
                         const adjustedMinX = minX + size / 2
                         const adjustedMaxX = maxX - size / 2
 
-                        let attempts = 0
-                        while (attempts < 50) {
-                            attempts++
-                            const rx = Phaser.Math.Between(adjustedMinX, adjustedMaxX)
-                            const ry = Phaser.Math.Between(chunkTop, chunkBottom)
+                        const rx = Phaser.Math.Between(adjustedMinX, adjustedMaxX)
+                        const ry = Phaser.Math.Between(chunkTop, chunkBottom)
 
-                            // Larger clearance for bigger obstacles
-                            if (this.isSpaceClear(rx, ry, size + 40)) {
-                                if (typeName === 'pentagon') {
-                                    this.spawnPentagon(rx, ry, config)
-                                } else if (typeName === 'hexagon') {
-                                    this.spawnHexagonPair(ry, config)
-                                }
-                                break
-                            }
+                        if (typeName === 'pentagon') {
+                            this.spawnPentagon(rx, ry, config)
+                        } else if (typeName === 'hexagon') {
+                            this.spawnHexagonPair(ry, config)
                         }
                     }
 
