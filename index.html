@@ -107,7 +107,7 @@
                  */
                 const BASE_URL = 'https://agiscend.loiyaa.com/';
                 const isLocal = window.location.protocol === 'file:';
-                const TRACK_COUNT = 6;
+                const TRACK_COUNT = 9;
                 const SILENCE_BETWEEN_TRACKS = 4000; // 4 seconds
 
                 // Music state
@@ -527,6 +527,9 @@
 
                         // Beam hit stun - prevents flapping after beam hit
                         this.beamHitTime = 0
+
+                        // Spike Warning UI state (distance-based)
+                        this.spikeWarningLevel = 0  // 0 = safe, 1 = caution (< 2000m), 2 = danger (< 1000m)
                     }
 
                     create() {
@@ -760,6 +763,61 @@
                             stroke: '#ffffff',
                             strokeThickness: 6
                         }).setOrigin(0.5).setScrollFactor(0).setDepth(100)
+
+                        // Spike Chase Warning UI - positioned symmetrically left and right of score
+                        const warningOffset = 120 // Distance from center to each warning symbol
+
+                        // Left exclamation point (shown during warning phase)
+                        this.warningLeftExclaim = this.add.text(
+                            GameSettings.canvas.width / 2 - warningOffset, 50, '!',
+                            {
+                                fontFamily: 'Arial',
+                                fontSize: '72px',
+                                fontStyle: 'bold',
+                                color: '#ffffff',
+                                stroke: '#000000',
+                                strokeThickness: 8
+                            }
+                        ).setOrigin(0.5).setScrollFactor(0).setDepth(101).setVisible(false)
+
+                        // Right exclamation point (shown during warning phase)
+                        this.warningRightExclaim = this.add.text(
+                            GameSettings.canvas.width / 2 + warningOffset, 50, '!',
+                            {
+                                fontFamily: 'Arial',
+                                fontSize: '72px',
+                                fontStyle: 'bold',
+                                color: '#ffffff',
+                                stroke: '#000000',
+                                strokeThickness: 8
+                            }
+                        ).setOrigin(0.5).setScrollFactor(0).setDepth(101).setVisible(false)
+
+                        // Left warning triangle (replaces exclamation during active chase)
+                        this.warningLeftTriangle = this.add.text(
+                            GameSettings.canvas.width / 2 - warningOffset, 50, '⚠',
+                            {
+                                fontFamily: 'Arial',
+                                fontSize: '96px',
+                                fontStyle: 'bold',
+                                color: '#ffffff',
+                                stroke: '#000000',
+                                strokeThickness: 8
+                            }
+                        ).setOrigin(0.5).setScrollFactor(0).setDepth(101).setVisible(false)
+
+                        // Right warning triangle (replaces exclamation during active chase)
+                        this.warningRightTriangle = this.add.text(
+                            GameSettings.canvas.width / 2 + warningOffset, 50, '⚠',
+                            {
+                                fontFamily: 'Arial',
+                                fontSize: '96px',
+                                fontStyle: 'bold',
+                                color: '#ffffff',
+                                stroke: '#000000',
+                                strokeThickness: 8
+                            }
+                        ).setOrigin(0.5).setScrollFactor(0).setDepth(101).setVisible(false)
 
                         this.tutorialText = this.add.text(GameSettings.canvas.width / 2, GameSettings.canvas.height / 2 + 100, 'TAP TO FLAP', {
                             fontFamily: 'Arial',
@@ -1332,6 +1390,81 @@
                         console.log(`[INTERVAL] Spawned ${numColumns} column(s) of 4 coins (${totalCoins} total) above Y=${baseY}`)
                     }
 
+                    // Update spike warning UI based on distance from player
+                    updateSpikeWarning(time) {
+                        // Calculate distance from spikes to player (in Phaser, higher Y = lower on screen)
+                        const spikeDistance = this.spikeContainer.y - this.player.y
+
+                        // Determine warning level based on distance
+                        let newLevel = 0
+                        if (spikeDistance < 1000) {
+                            newLevel = 2  // Danger - very close
+                        } else if (spikeDistance < 2000) {
+                            newLevel = 1  // Caution - getting close
+                        }
+
+                        // Handle level transitions
+                        if (newLevel !== this.spikeWarningLevel) {
+                            this.spikeWarningLevel = newLevel
+
+                            // Update visibility based on level
+                            if (newLevel === 0) {
+                                // Safe - hide all warnings
+                                this.warningLeftExclaim.setVisible(false)
+                                this.warningRightExclaim.setVisible(false)
+                                this.warningLeftTriangle.setVisible(false)
+                                this.warningRightTriangle.setVisible(false)
+                            } else if (newLevel === 1) {
+                                // Caution - show blinking exclamation points
+                                this.warningLeftExclaim.setVisible(true)
+                                this.warningRightExclaim.setVisible(true)
+                                this.warningLeftTriangle.setVisible(false)
+                                this.warningRightTriangle.setVisible(false)
+                            } else if (newLevel === 2) {
+                                // Danger - show pulsing warning triangles
+                                this.warningLeftExclaim.setVisible(false)
+                                this.warningRightExclaim.setVisible(false)
+                                this.warningLeftTriangle.setVisible(true)
+                                this.warningRightTriangle.setVisible(true)
+                            }
+                        }
+
+                        // Animate based on current level
+                        if (this.spikeWarningLevel === 1) {
+                            // Blink exclamation points (toggle every 250ms)
+                            const blinkOn = Math.floor(time / 250) % 2 === 0
+                            this.warningLeftExclaim.setVisible(blinkOn)
+                            this.warningRightExclaim.setVisible(blinkOn)
+                        } else if (this.spikeWarningLevel === 2) {
+                            // Pulse warning triangles (scale 0.8 to 1.2, 200ms cycle)
+                            const pulseScale = 1.0 + 0.2 * Math.sin(time / 200 * Math.PI)
+                            this.warningLeftTriangle.setScale(pulseScale)
+                            this.warningRightTriangle.setScale(pulseScale)
+
+                            // Also pulse alpha
+                            const pulseAlpha = 0.7 + 0.3 * Math.sin(time / 150 * Math.PI)
+                            this.warningLeftTriangle.setAlpha(pulseAlpha)
+                            this.warningRightTriangle.setAlpha(pulseAlpha)
+                        }
+                    }
+
+                    // Reset spike warning UI
+                    resetSpikeWarning() {
+                        this.spikeWarningLevel = 0
+
+                        // Hide all warning UI
+                        this.warningLeftExclaim.setVisible(false)
+                        this.warningRightExclaim.setVisible(false)
+                        this.warningLeftTriangle.setVisible(false)
+                        this.warningRightTriangle.setVisible(false)
+
+                        // Reset scales and alpha
+                        this.warningLeftExclaim.setScale(1).setAlpha(1)
+                        this.warningRightExclaim.setScale(1).setAlpha(1)
+                        this.warningLeftTriangle.setScale(1).setAlpha(1)
+                        this.warningRightTriangle.setScale(1).setAlpha(1)
+                    }
+
                     // Handle reaching an interval milestone
                     handleIntervalReached(intervalAltitude) {
                         console.log(`[INTERVAL] ===== PLAYER REACHED INTERVAL at ${intervalAltitude}m =====`)
@@ -1355,21 +1488,15 @@
                             console.log(`[INTERVAL] Completed cycle ${cycleNumber}! Hazard speed now: ${GameSettings.gameplay.hazardSpeed}`)
                         }
 
-                        // Teleport spikes to 500m below player IF they are currently further than 500m away.
-                        // If they are closer than 500m, keep them where they are (don't give a free pass).
-                        const safeguardDistance = 500
+                        // Always teleport spikes 1000m below player on interval break
+                        const safeguardDistance = 1000
                         const targetSpikeY = this.player.y + safeguardDistance
+                        this.surgeTargetY = targetSpikeY
+                        this.spikeContainer.y = targetSpikeY
+                        console.log(`[INTERVAL] Teleporting spikes 1000m below player (Y=${targetSpikeY})`)
 
-                        // In Phaser, higher Y is lower on screen. 
-                        // If current surgeTargetY is greater than target (meaning it's further down than 500m)...
-                        if (this.surgeTargetY > targetSpikeY) {
-                            this.surgeTargetY = targetSpikeY
-                            // Snap current container Y as well to ensure it doesn't stay behind if player ascended very fast
-                            this.spikeContainer.y = targetSpikeY
-                            console.log(`[INTERVAL] Spikes were far away (${Math.floor(this.spikeContainer.y - this.player.y)}m). Resetting surge target closer to player (Y=${targetSpikeY})`)
-                        } else {
-                            console.log(`[INTERVAL] Spikes are already close (${Math.floor(this.spikeContainer.y - this.player.y)}m). Maintaining pressure.`)
-                        }
+                        // Reset spike warning UI
+                        this.resetSpikeWarning()
 
                         console.log(`[INTERVAL] Next interval: ${this.intervalAltitudes[this.nextIntervalIndex] || 'none'}m`)
 
@@ -2086,6 +2213,9 @@
                                 currentAltitude >= this.intervalAltitudes[this.nextIntervalIndex]) {
                                 this.handleIntervalReached(this.intervalAltitudes[this.nextIntervalIndex])
                             }
+
+                            // Spike Warning System - update based on spike distance
+                            this.updateSpikeWarning(time)
 
                             // Update hexagon pairs (firing, spinning, beams)
                             this.updateHexagonPairs(time)
