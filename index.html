@@ -107,7 +107,7 @@
                  */
                 const BASE_URL = 'https://agiscend.loiyaa.com/';
                 const isLocal = window.location.protocol === 'file:';
-                const TRACK_COUNT = 11;
+                const TRACK_COUNT = 13;
                 const SILENCE_BETWEEN_TRACKS = 4000; // 4 seconds
 
                 // Music state
@@ -240,7 +240,7 @@
                         horizontalSpeed: 400,
                         baseHazardSpeed: 120, // Base spike speed
                         hazardSpeed: 120, // Current spike speed
-                        hazardIncrease: 40, // Spike speed increase per wall
+                        hazardIncrease: 20, // Spike speed increase per wall
                         obstacleSize: 45,
                         wallThickness: 35,
                         coinSpawnRate: 0.8,
@@ -271,11 +271,17 @@
                             spinDuration: 500 // Last 0.5 second of recharge = spinning
                         },
                         heptagon: {
-                            startInterval: 1, // Set to 1 for testing
+                            startInterval: 13, // Production value
                             spawnRate: [2, 4],
                             size: 64, // Slightly larger than triangle coins
                             bounceSpeed: 400, // Horizontal speed when bouncing between walls
                             fallSpeed: 186 // Downward speed (~25° diagonal angle)
+                        },
+                        octagon: {
+                            startInterval: 1, // Set to 1 for testing
+                            spawnRate: [2, 4],
+                            size: 135, //
+                            shootInterval: 2000 // Shoot a square every second
                         }
                     },
                     visuals: {
@@ -591,6 +597,13 @@
                             allowGravity: false,
                             immovable: true
                         })
+                        // Octagons: static group (immobile shooters)
+                        this.octagons = this.physics.add.staticGroup()
+                        // Octagon projectiles: dynamic group (squares shot by octagons)
+                        this.octagonProjectiles = this.physics.add.group({
+                            allowGravity: false,
+                            immovable: true
+                        })
 
                         // Spikes Container for undulation
                         this.spikeContainer = this.add.container(0, GameSettings.canvas.height + 50)
@@ -774,6 +787,19 @@
                             const boostFactor = 2.0
                             p.body.velocity.x *= boostFactor
                             p.body.velocity.y *= boostFactor
+                        })
+                        // Octagon collision: bounce off the octagons
+                        this.physics.add.collider(this.player, this.octagons, (p, octagon) => {
+                            this.cameras.main.shake(100, 0.006)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                        })
+                        // Octagon projectile collision: bounce off like normal obstacles, shrink on hit
+                        this.physics.add.collider(this.player, this.octagonProjectiles, (p, projectile) => {
+                            this.cameras.main.shake(100, 0.006)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                            this.shrinkObject(projectile, true)
                         })
 
                         // 7. Input
@@ -1037,6 +1063,33 @@
                         heptG.strokePath()
                         heptG.generateTexture('heptagon', heptSize, heptSize)
                         heptG.destroy()
+
+                        // Octagon Texture - black fill with white outline
+                        const octSize = GameSettings.obstacleTypes.octagon.size
+                        const octG = this.make.graphics()
+                        octG.fillStyle(0x000000)
+                        octG.lineStyle(3, 0xffffff)
+                        const octRadius = octSize / 2
+                        const octCenterX = octRadius
+                        const octCenterY = octRadius
+                        const octPoints = []
+                        for (let i = 0; i < 8; i++) {
+                            const angle = (i * 2 * Math.PI / 8) - Math.PI / 8 // Offset to have flat top
+                            octPoints.push({
+                                x: octCenterX + octRadius * 0.9 * Math.cos(angle),
+                                y: octCenterY + octRadius * 0.9 * Math.sin(angle)
+                            })
+                        }
+                        octG.beginPath()
+                        octG.moveTo(octPoints[0].x, octPoints[0].y)
+                        for (let i = 1; i < 8; i++) {
+                            octG.lineTo(octPoints[i].x, octPoints[i].y)
+                        }
+                        octG.closePath()
+                        octG.fillPath()
+                        octG.strokePath()
+                        octG.generateTexture('octagon', octSize, octSize)
+                        octG.destroy()
 
                         // BG Texture 1: Far Layer - 1024x2048
                         const texW = 1024
@@ -1369,7 +1422,7 @@
                         const width = GameSettings.canvas.width
                         const wallThick = GameSettings.gameplay.wallThickness
                         const blockSize = GameSettings.gameplay.obstacleSize
-                        const gap = 52 // Gap sized to fit 6-7 normal blocks
+                        const gap = 64 // Gap sized to fit 6-7 normal blocks
 
                         // Calculate how many blocks fit across the playable area with gaps
                         const playableWidth = width - (wallThick * 2)
@@ -1747,6 +1800,17 @@
                             }
                         })
 
+                        // Also check against octagons
+                        this.octagons.children.each(octagon => {
+                            if (!octagon.active) return
+                            const dx = x - octagon.x
+                            const dy = y - octagon.y
+                            const octagonMinDistSq = (minDist + GameSettings.obstacleTypes.octagon.size / 2) ** 2
+                            if ((dx * dx + dy * dy) < octagonMinDistSq) {
+                                isClear = false
+                            }
+                        })
+
                         return isClear
                     }
 
@@ -1791,6 +1855,8 @@
                             this.spawnHexagonPair(ry, config)
                         } else if (typeName === 'heptagon') {
                             this.spawnHeptagon(rx, ry, config)
+                        } else if (typeName === 'octagon') {
+                            this.spawnOctagon(rx, ry, config)
                         }
                     }
 
@@ -1878,6 +1944,73 @@
                             // Rotate the heptagon for visual effect
                             heptagon.angle += 2
                         })
+                    }
+
+                    // Spawn an octagon obstacle (immobile shooter)
+                    spawnOctagon(x, y, config) {
+                        const octagon = this.octagons.create(x, y, 'octagon')
+                        const size = config.size
+
+                        // Set display size
+                        octagon.setDisplaySize(size, size)
+                        octagon.refreshBody()
+
+                        // Store shooting config
+                        octagon.shootInterval = config.shootInterval
+                        octagon.lastShotTime = this.time.now
+
+                        console.log(`[OBSTACLE] Spawned octagon at (${x}, ${y})`)
+                    }
+
+                    // Update octagons - handle shooting towards player
+                    updateOctagons(time) {
+                        this.octagons.children.each((octagon) => {
+                            if (!octagon.active) return
+
+                            // Check if it's time to shoot
+                            if (time - octagon.lastShotTime >= octagon.shootInterval) {
+                                octagon.lastShotTime = time
+                                this.octagonShoot(octagon)
+                            }
+                        })
+                    }
+
+                    // Octagon shoots a square towards the player
+                    octagonShoot(octagon) {
+                        if (!this.player || !this.player.active) return
+
+                        // Only fire if player is below the octagon (higher Y value = lower on screen)
+                        if (this.player.y <= octagon.y) return
+
+                        // Only fire if player is within range (roughly half screen distance)
+                        const dx = this.player.x - octagon.x
+                        const dy = this.player.y - octagon.y
+                        const dist = Math.sqrt(dx * dx + dy * dy)
+                        const maxRange = 1000
+                        if (dist > maxRange) return
+
+                        // Belching animation - pulse sharply twice over 400ms
+                        this.tweens.add({
+                            targets: octagon,
+                            scaleX: 1.2,
+                            scaleY: 0.8,
+                            duration: 100,
+                            yoyo: true,
+                            repeat: 1,
+                            ease: 'Quad.easeOut'
+                        })
+
+                        // Create a projectile square
+                        const projectile = this.octagonProjectiles.create(octagon.x, octagon.y, 'block')
+                        const blockSize = 90 // Same size as normal blocks
+                        projectile.setDisplaySize(blockSize, blockSize)
+
+                        // Normalize and set velocity
+                        const speed = 300
+                        if (dist > 0) {
+                            projectile.body.setVelocityX((dx / dist) * speed)
+                            projectile.body.setVelocityY((dy / dist) * speed)
+                        }
                     }
 
                     // Spawn a hexagon pair on opposite walls
@@ -2345,6 +2478,9 @@
                             // Update heptagons (wall bouncing)
                             this.updateHeptagons()
 
+                            // Update octagons (shooting)
+                            this.updateOctagons(time)
+
                         }
 
                         const currentCamTop = this.cameras.main.scrollY
@@ -2389,6 +2525,18 @@
                         this.heptagons.children.each((heptagon) => {
                             if (heptagon.active && heptagon.y > cleanupLimitY) {
                                 heptagon.destroy()
+                            }
+                        })
+                        // Cleanup octagons
+                        this.octagons.children.each((octagon) => {
+                            if (octagon.active && octagon.y > cleanupLimitY) {
+                                octagon.destroy()
+                            }
+                        })
+                        // Cleanup octagon projectiles
+                        this.octagonProjectiles.children.each((projectile) => {
+                            if (projectile.active && projectile.y > cleanupLimitY) {
+                                projectile.destroy()
                             }
                         })
 
