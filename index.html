@@ -269,6 +269,13 @@
                             fireDuration: 2000, // 1 second firing
                             rechargeDuration: 1000, // 1 second recharge
                             spinDuration: 500 // Last 0.5 second of recharge = spinning
+                        },
+                        heptagon: {
+                            startInterval: 1, // Set to 1 for testing
+                            spawnRate: [2, 4],
+                            size: 64, // Slightly larger than triangle coins
+                            bounceSpeed: 400, // Horizontal speed when bouncing between walls
+                            fallSpeed: 186 // Downward speed (~25° diagonal angle)
                         }
                     },
                     visuals: {
@@ -526,8 +533,8 @@
                         // Hexagon pairs tracking
                         this.hexagonPairs = []
 
-                        // Beam hit stun - prevents flapping after beam hit
-                        this.beamHitTime = 0
+                        // Stun - prevents flapping after certain hits (beam, heptagon)
+                        this.stunHitTime = 0
 
                         // Spike Warning UI state (distance-based)
                         this.spikeWarningLevel = 0  // 0 = safe, 1 = caution (< 2000m), 2 = danger (< 1000m)
@@ -579,6 +586,11 @@
                         this.hexagons = this.physics.add.staticGroup()
                         // Hexagon beams: static group for the laser rays
                         this.hexagonBeams = this.physics.add.staticGroup()
+                        // Heptagons: dynamic group (they bounce between walls)
+                        this.heptagons = this.physics.add.group({
+                            allowGravity: false,
+                            immovable: true
+                        })
 
                         // Spikes Container for undulation
                         this.spikeContainer = this.add.container(0, GameSettings.canvas.height + 50)
@@ -742,10 +754,23 @@
                             this.cameras.main.shake(150, 0.01)
                             this.spawnParticles(p.x, p.y)
                             this.blobCollide()
-                            // Mark beam hit time - prevents flapping for a short duration
-                            this.beamHitTime = this.time.now
+                            // Mark stun hit time - prevents flapping for a short duration
+                            this.stunHitTime = this.time.now
 
                             // Amplify the bounce velocity for a stronger knockback
+                            const boostFactor = 2.0
+                            p.body.velocity.x *= boostFactor
+                            p.body.velocity.y *= boostFactor
+                        })
+                        // Heptagon collision: bounce off with strength 2 and stun
+                        this.physics.add.collider(this.player, this.heptagons, (p, heptagon) => {
+                            this.cameras.main.shake(150, 0.01)
+                            this.spawnParticles(p.x, p.y)
+                            this.blobCollide()
+                            // Mark stun hit time - prevents flapping for a short duration
+                            this.stunHitTime = this.time.now
+
+                            // Amplify the bounce velocity for a stronger knockback (strength 2)
                             const boostFactor = 2.0
                             p.body.velocity.x *= boostFactor
                             p.body.velocity.y *= boostFactor
@@ -986,6 +1011,33 @@
                         hexG.generateTexture('hexagon', hexSize, hexSize)
                         hexG.destroy()
 
+                        // Heptagon Texture - black fill with white outline (same size as coins)
+                        const heptSize = GameSettings.obstacleTypes.heptagon.size
+                        const heptG = this.make.graphics()
+                        heptG.fillStyle(0x000000)
+                        heptG.lineStyle(2, 0xffffff)
+                        const heptRadius = heptSize / 2
+                        const heptCenterX = heptRadius
+                        const heptCenterY = heptRadius
+                        const heptPoints = []
+                        for (let i = 0; i < 7; i++) {
+                            const angle = (i * 2 * Math.PI / 7) - Math.PI / 2
+                            heptPoints.push({
+                                x: heptCenterX + heptRadius * 0.9 * Math.cos(angle),
+                                y: heptCenterY + heptRadius * 0.9 * Math.sin(angle)
+                            })
+                        }
+                        heptG.beginPath()
+                        heptG.moveTo(heptPoints[0].x, heptPoints[0].y)
+                        for (let i = 1; i < 7; i++) {
+                            heptG.lineTo(heptPoints[i].x, heptPoints[i].y)
+                        }
+                        heptG.closePath()
+                        heptG.fillPath()
+                        heptG.strokePath()
+                        heptG.generateTexture('heptagon', heptSize, heptSize)
+                        heptG.destroy()
+
                         // BG Texture 1: Far Layer - 1024x2048
                         const texW = 1024
                         const texH = 2048
@@ -1124,9 +1176,9 @@
 
                         const now = this.time.now
 
-                        // Prevent flapping if recently hit by beam (let bounce complete)
-                        const beamStunDuration = 400 // ms
-                        if (now - this.beamHitTime < beamStunDuration) {
+                        // Prevent flapping if recently stunned (beam hit, heptagon hit, etc.)
+                        const stunDuration = 400 // ms
+                        if (now - this.stunHitTime < stunDuration) {
                             return
                         }
 
@@ -1684,6 +1736,17 @@
                             }
                         })
 
+                        // Also check against heptagons
+                        this.heptagons.children.each(heptagon => {
+                            if (!heptagon.active) return
+                            const dx = x - heptagon.x
+                            const dy = y - heptagon.y
+                            const heptagonMinDistSq = (minDist + GameSettings.obstacleTypes.heptagon.size / 2) ** 2
+                            if ((dx * dx + dy * dy) < heptagonMinDistSq) {
+                                isClear = false
+                            }
+                        })
+
                         return isClear
                     }
 
@@ -1726,6 +1789,8 @@
                             this.spawnPentagon(rx, ry, config)
                         } else if (typeName === 'hexagon') {
                             this.spawnHexagonPair(ry, config)
+                        } else if (typeName === 'heptagon') {
+                            this.spawnHeptagon(rx, ry, config)
                         }
                     }
 
@@ -1750,6 +1815,69 @@
                         pentagon.spawnTime = this.time.now
 
                         console.log(`[OBSTACLE] Spawned pentagon at (${x}, ${y})`)
+                    }
+
+                    // Spawn a heptagon obstacle that bounces between walls
+                    spawnHeptagon(x, y, config) {
+                        const size = config.size
+                        const wallThick = GameSettings.gameplay.wallThickness
+                        const minX = wallThick + size / 2
+                        const maxX = GameSettings.canvas.width - wallThick - size / 2
+
+                        // All heptagons in swarm share the same initial direction
+                        const direction = Math.random() > 0.5 ? 1 : -1
+
+                        // Spawn 7 heptagons with slight position variation
+                        for (let i = 0; i < 7; i++) {
+                            // Vary position slightly (spread of ~256px)
+                            const offsetX = Phaser.Math.Between(-128, 128)
+                            const offsetY = Phaser.Math.Between(-128, 128)
+                            let spawnX = Phaser.Math.Clamp(x + offsetX, minX, maxX)
+                            let spawnY = y + offsetY
+
+                            const heptagon = this.heptagons.create(spawnX, spawnY, 'heptagon')
+
+                            // Set display size
+                            heptagon.setDisplaySize(size, size)
+
+                            // Configure physics body - circular for heptagon
+                            heptagon.body.setCircle(size / 2)
+
+                            // Set initial horizontal velocity (same direction for all)
+                            heptagon.body.setVelocityX(config.bounceSpeed * direction)
+
+                            // Set constant downward velocity for diagonal movement (~25° angle)
+                            heptagon.body.setVelocityY(config.fallSpeed)
+
+                            // Store bounce bounds for wall-to-wall movement
+                            heptagon.bounceLeftX = minX
+                            heptagon.bounceRightX = maxX
+                            heptagon.bounceSpeed = config.bounceSpeed
+                            heptagon.fallSpeed = config.fallSpeed
+                        }
+
+                        console.log(`[OBSTACLE] Spawned 7 heptagons near (${x}, ${y})`)
+                    }
+
+                    // Update heptagons - handle wall bouncing
+                    updateHeptagons() {
+                        this.heptagons.children.each((heptagon) => {
+                            if (!heptagon.active) return
+
+                            // Check for wall collision and bounce
+                            if (heptagon.x <= heptagon.bounceLeftX) {
+                                heptagon.x = heptagon.bounceLeftX
+                                heptagon.body.setVelocityX(heptagon.bounceSpeed)
+                                heptagon.body.setVelocityY(heptagon.fallSpeed)
+                            } else if (heptagon.x >= heptagon.bounceRightX) {
+                                heptagon.x = heptagon.bounceRightX
+                                heptagon.body.setVelocityX(-heptagon.bounceSpeed)
+                                heptagon.body.setVelocityY(heptagon.fallSpeed)
+                            }
+
+                            // Rotate the heptagon for visual effect
+                            heptagon.angle += 2
+                        })
                     }
 
                     // Spawn a hexagon pair on opposite walls
@@ -2214,6 +2342,9 @@
                             // Update hexagon pairs (firing, spinning, beams)
                             this.updateHexagonPairs(time)
 
+                            // Update heptagons (wall bouncing)
+                            this.updateHeptagons()
+
                         }
 
                         const currentCamTop = this.cameras.main.scrollY
@@ -2252,6 +2383,12 @@
                         this.hexagonBeams.children.each((beam) => {
                             if (beam.active && beam.y > cleanupLimitY) {
                                 beam.destroy()
+                            }
+                        })
+                        // Cleanup heptagons
+                        this.heptagons.children.each((heptagon) => {
+                            if (heptagon.active && heptagon.y > cleanupLimitY) {
+                                heptagon.destroy()
                             }
                         })
 
