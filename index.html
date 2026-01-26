@@ -240,7 +240,7 @@
                         horizontalSpeed: 400,
                         baseHazardSpeed: 120, // Base spike speed
                         hazardSpeed: 120, // Current spike speed
-                        hazardIncrease: 20, // Spike speed increase per wall
+                        hazardIncrease: 10, // Spike speed increase per wall
                         obstacleSize: 45,
                         wallThickness: 35,
                         coinSpawnRate: 0.8,
@@ -279,7 +279,7 @@
                         },
                         octagon: {
                             startInterval: 17, // Set to 1 for testing
-                            spawnRate: [2, 4],
+                            spawnRate: [4, 8],
                             size: 135, //
                             shootInterval: 2000 // Shoot a square every second
                         }
@@ -2463,9 +2463,10 @@
 
                             // Check for interval milestones
                             const currentAltitude = this.getPlayerAltitude()
+                            const triggerOffset = GameSettings.gameplay.obstacleSize
 
                             if (this.nextIntervalIndex < this.intervalAltitudes.length &&
-                                currentAltitude >= this.intervalAltitudes[this.nextIntervalIndex]) {
+                                currentAltitude >= this.intervalAltitudes[this.nextIntervalIndex] + triggerOffset) {
                                 this.handleIntervalReached(this.intervalAltitudes[this.nextIntervalIndex])
                             }
 
